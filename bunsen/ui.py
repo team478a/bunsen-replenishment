@@ -1,3 +1,4 @@
+import copy
 import json
 import os
 import sqlite3
@@ -7,7 +8,8 @@ from datetime import date
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from .core import DataError, LABELS, now_jst, shortages, units, validate
+from .core import DataError, LABELS, allocation_label, now_jst, shortages, units, validate
+from .lot_dialog import LotAllocationDialog
 from .service import Service, write_reports
 
 
@@ -19,6 +21,7 @@ class App:
         self.lines = None
         self.dispatch = None
         self.expected_revision = None
+        self.lot_dialog = None
         self.home = Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'BunsenReplenishment'
         self.service = Service(self.home / 'history.db')
         root.title('ブンセン 補充出荷指示 — サンプル仕様')
@@ -58,6 +61,7 @@ class App:
         ttk.Label(edit, text='実ロット').pack(side='left')
         ttk.Entry(edit, textvariable=self.lot, width=16).pack(side='left', padx=4)
         ttk.Button(edit, text='3 数量・ロットを反映', command=lambda: self.run(self.edit)).pack(side='left')
+        ttk.Button(edit, text='複数ロットを指定', command=lambda: self.run(self.open_allocations)).pack(side='left', padx=5)
         self.detail = tk.Text(daily, height=11, wrap='word')
         self.detail.pack(fill='both', expand=True, pady=10)
         author = ttk.Frame(daily)
@@ -100,6 +104,9 @@ class App:
         self.detail.configure(state='disabled')
 
     def invalidate(self):
+        if self.lot_dialog is not None and self.lot_dialog.winfo_exists():
+            self.lot_dialog.destroy()
+        self.lot_dialog = None
         self.lines = None
         self.expected_revision = None
         self.ack.set(False)
@@ -135,7 +142,7 @@ class App:
         self.tree.delete(*self.tree.get_children())
         products = {r['product']: r for r in self.data.tables['products']}
         for i, row in enumerate(self.lines):
-            self.tree.insert('', 'end', iid=str(i), values=(LABELS[row['warehouse']], row['product'], row['suggested_p'], row['quantity_p'], units(row['quantity_p'], products[row['product']]), row['lot'] or '未確認', row['arrival']))
+            self.tree.insert('', 'end', iid=str(i), values=(LABELS[row['warehouse']], row['product'], row['suggested_p'], row['quantity_p'], units(row['quantity_p'], products[row['product']]), allocation_label(row), row['arrival']))
         errors = validate(self.data, self.lines, self.dispatch)
         basis = [f'{LABELS[r["warehouse"]]} {r["product"]}: 在庫{r["inventory_p"]}P ({r["inventory_as_of"]}) + 輸送中{r["transit_p"]}P - 到着前予測{r["before_p"]}P / 対象予測{r["demand_p"]}P + 安全在庫{r["safety_p"]}P → 必要{r["required_p"]}P → {r["rounding"]}推奨{r["suggested_p"]}P\n予測基準: {", ".join(r["forecast_as_of"])} / 輸送中確認: {r["transit_checked_at"]} {r["warning"]}' for r in self.lines]
         projections = []
@@ -156,10 +163,35 @@ class App:
         if not self.qty.get().isascii() or not self.qty.get().isdecimal():
             raise DataError(['数量Pは0以上の整数必須'])
         row = self.lines[int(self.tree.selection()[0])]
+        if 'allocations' in row:
+            raise DataError(['複数ロット指定済みの明細は「複数ロットを指定」画面で変更してください'])
         before = dict(row)
         row.update(quantity_p=int(self.qty.get()), lot=self.lot.get().strip())
         self.ack.set(False)
         self.service.event('edit', {'digest': self.data.digest, 'before': before, 'after': row})
+        self.refresh()
+
+    def open_allocations(self):
+        if not self.lines or not self.tree.selection():
+            raise DataError(['ロットを指定する明細を選択してください'])
+        if self.lot_dialog is not None and self.lot_dialog.winfo_exists():
+            self.lot_dialog.lift()
+            return
+        index = int(self.tree.selection()[0])
+        row = self.lines[index]
+        if str(row['quantity_p']) != self.qty.get() or row['lot'] != self.lot.get().strip():
+            raise DataError(['編集中の数量・ロットを反映してから複数ロットを指定してください'])
+        self.ack.set(False)
+        self.lot_dialog = LotAllocationDialog(self.root, self.data, self.lines, index, self.dispatch,
+                                              lambda quantity, rows: self.apply_allocations(index, quantity, rows), self.service.clock)
+
+    def apply_allocations(self, index, quantity, assignments):
+        row = self.lines[index]
+        before = copy.deepcopy(row)
+        after = dict(row, quantity_p=quantity, lot='', allocations=copy.deepcopy(assignments))
+        self.service.event('edit', {'digest': self.data.digest, 'before': before, 'after': after})
+        row.update(after)
+        self.ack.set(False)
         self.refresh()
 
     def issue(self, formal):

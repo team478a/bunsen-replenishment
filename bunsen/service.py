@@ -8,7 +8,7 @@ import tempfile
 from datetime import date
 from pathlib import Path
 
-from .core import DataError, LABELS, WAREHOUSES, calculate, load, now_jst, units, validate
+from .core import DataError, LABELS, WAREHOUSES, allocations, calculate, load, now_jst, units, validate
 
 
 def encode(value):
@@ -72,6 +72,9 @@ class Service:
             row.update(quantity_p=edited['quantity_p'], lot=edited['lot'])
             if type(row['quantity_p']) is not int or row['quantity_p'] < 0:
                 raise DataError(['数量は0以上の整数必須'])
+            if 'allocations' in edited:
+                # Validate structure even for drafts so report rendering is safe.
+                row['allocations'] = allocations(edited)
         errors = validate(fresh, canonical, dispatch, self.clock())
         if formal and (not operator.strip() or not acknowledged):
             errors.append('担当者名と実ロット・期限・積載の再確認操作が必要')
@@ -148,17 +151,29 @@ def report_html(payload, warehouse):
         if row['warehouse'] != warehouse:
             continue
         product = products[row['product']]
-        stock = stocks.get((row['product'], row['lot']))
-        values = [row['product'], product['name'], row['quantity_p'], units(row['quantity_p'], product),
-                  row['lot'] or '未確認', stock['best_before'] if stock else '未確認', row['dispatch'], row['arrival']]
-        body.append('<tr>' + ''.join(f'<td>{esc(v)}</td>' for v in values) + '</tr>')
+        assigned = allocations(row)
+        allocation_total = sum(a['quantity_p'] for a in assigned)
+        if 'allocations' in row:
+            body.append(f'<tr><td colspan="8" class="basis">{esc(row["product"])} 指示合計 {row["quantity_p"]} P（{esc(units(row["quantity_p"], product))}）／ロット割当合計 {allocation_total} P</td></tr>')
+        for allocation in assigned:
+            stock = stocks.get((row['product'], allocation['lot']))
+            values = [row['product'], product['name'], allocation['quantity_p'], units(allocation['quantity_p'], product),
+                      allocation['lot'] or '未確認', stock['best_before'] if stock else '未確認', row['dispatch'], row['arrival']]
+            body.append('<tr>' + ''.join(f'<td>{esc(v)}</td>' for v in values) + '</tr>')
+            if stock:
+                body.append(f'<tr><td colspan="8" class="basis">ロット {esc(allocation["lot"])} 現物確認 {esc(stock["checked_at"])}／{esc(stock["checker"])}</td></tr>')
+        if not assigned:
+            values = [row['product'], product['name'], row['quantity_p'], units(row['quantity_p'], product),
+                      '未割当／合計不一致' if row['quantity_p'] else '出荷なし', '未確認', row['dispatch'], row['arrival']]
+            body.append('<tr>' + ''.join(f'<td>{esc(v)}</td>' for v in values) + '</tr>')
+        elif allocation_total != row['quantity_p']:
+            difference = row['quantity_p'] - allocation_total
+            body.append(f'<tr><td colspan="8" class="basis">ロット別数量の合計不一致: {"未割当" if difference > 0 else "割当超過"} {abs(difference)} P。正式指示は発行不可。</td></tr>')
         basis = (f'在庫 {row["inventory_p"]}P（{row["inventory_as_of"]}）、輸送中 {row["transit_p"]}P'
                  f'（網羅確認 {row["transit_checked_at"]}）、到着前予測 {row["before_p"]}P、'
                  f'対象予測 {row["demand_p"]}P（予測基準 {", ".join(row["forecast_as_of"])}）、'
                  f'安全在庫 {row["safety_p"]}P → 必要 {row["required_p"]}P → '
                  f'{row["rounding"]}推奨 {row["suggested_p"]}P → 指示 {row["quantity_p"]}P。{row["warning"]}')
-        if stock:
-            basis += f' 現物確認 {stock["checked_at"]}／{stock["checker"]}'
         body.append(f'<tr><td colspan="8" class="basis">{esc(basis)}</td></tr>')
         timeline = row.get('timeline', [])
         if timeline:
