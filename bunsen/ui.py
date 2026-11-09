@@ -10,6 +10,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from .core import DataError, LABELS, allocation_label, now_jst, shortages, units, validate
 from .lot_dialog import LotAllocationDialog
+from .planning import comparison_text
 from .service import Service, write_reports
 
 
@@ -22,6 +23,8 @@ class App:
         self.dispatch = None
         self.expected_revision = None
         self.lot_dialog = None
+        self.draft_number = None
+        self.draft_working = None
         self.home = Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'BunsenReplenishment'
         self.service = Service(self.home / 'history.db')
         root.title('ブンセン 補充出荷指示 — サンプル仕様')
@@ -33,6 +36,7 @@ class App:
         tabs = ttk.Notebook(root)
         tabs.pack(fill='both', expand=True)
         daily, settings = ttk.Frame(tabs, padding=12), ttk.Frame(tabs, padding=12)
+        self.tabs, self.daily = tabs, daily
         tabs.add(daily, text='日常操作')
         tabs.add(settings, text='管理設定・履歴')
         ttk.Label(daily, text='データ取込 → 補充計算 → 不足確認・修正 → 出荷指示書', font=('Yu Gothic UI', 17, 'bold')).pack(anchor='w')
@@ -46,6 +50,11 @@ class App:
         ttk.Button(bar, text='2 補充計算', command=lambda: self.run(self.compute)).pack(side='left', padx=5)
         self.info = tk.StringVar(value='CSVフォルダーを選択してください。欠損はゼロとして扱いません。')
         ttk.Label(daily, textvariable=self.info, wraplength=1100).pack(anchor='w')
+        resume_bar = ttk.Frame(daily)
+        resume_bar.pack(fill='x')
+        self.resume_info = tk.StringVar(value='新規計算')
+        ttk.Label(resume_bar, textvariable=self.resume_info).pack(side='left')
+        ttk.Button(resume_bar, text='仮指示の再開を終了', command=self.invalidate).pack(side='left', padx=10)
         columns = ('warehouse', 'product', 'suggested', 'quantity', 'units', 'lot', 'arrival')
         self.tree = ttk.Treeview(daily, columns=columns, show='headings', height=5, selectmode='browse')
         for col, label, width in zip(columns, ('倉庫', '商品', '推奨P', '指示P', 'PL＋甲', '実ロット', '到着日'), (160, 100, 90, 90, 200, 130, 130)):
@@ -82,6 +91,7 @@ class App:
         self.history_list = tk.Listbox(settings, height=7)
         self.history_list.pack(fill='x')
         ttk.Button(settings, text='選択履歴の帳票を再出力', command=lambda: self.run(self.reprint)).pack(anchor='w', pady=5)
+        ttk.Button(settings, text='選択した最新の仮指示を再開（画面内容を置換）', command=lambda: self.run(self.resume_draft)).pack(anchor='w', pady=5)
         self.day.trace_add('write', lambda *_: self.invalidate())
         self.qty.trace_add('write', lambda *_: self.ack.set(False))
         self.lot.trace_add('write', lambda *_: self.ack.set(False))
@@ -103,7 +113,12 @@ class App:
         self.detail.insert('1.0', text)
         self.detail.configure(state='disabled')
 
-    def invalidate(self):
+    def invalidate(self, keep_draft=False):
+        if keep_draft and self.draft_number and self.lines is not None:
+            self.draft_working = copy.deepcopy(self.lines)
+        if not keep_draft:
+            self.draft_number, self.draft_working = None, None
+            self.resume_info.set('新規計算')
         if self.lot_dialog is not None and self.lot_dialog.winfo_exists():
             self.lot_dialog.destroy()
         self.lot_dialog = None
@@ -114,28 +129,38 @@ class App:
         self.show('条件が変更されました。再計算が必要です。')
 
     def import_data(self):
+        if self.draft_number:
+            self.ensure_no_pending_edit()
         folder = filedialog.askdirectory(title='CSV一式のフォルダー')
         if not folder:
             return
-        self.invalidate()
+        self.invalidate(keep_draft=True)
         self.data = None  # A failed import must not leave the old data usable.
         self.info.set('データ未取込（取込を実行中、または不備による停止）')
         self.data = self.service.import_folder(folder)
         self.folder = folder
         self.info.set(f'取込済み: {folder} / データ識別 {self.data.digest[:16]}')
+        self.display_settings()
+        self.show('取込完了。補充計算で最新データと照合してください。再開中の仮指示の手修正は保持します。')
+
+    def display_settings(self):
         self.settings.configure(state='normal')
         self.settings.delete('1.0', 'end')
         self.settings.insert('1.0', json.dumps({k: self.data.tables[k] for k in ('products', 'warehouses', 'policies', 'vehicles')}, ensure_ascii=False, indent=2))
         self.settings.configure(state='disabled')
-        self.show('取込完了。補充計算を実行してください。')
 
     def compute(self):
         if self.data is None:
             raise DataError(['データ取込が必要'])
-        self.invalidate()
+        if self.draft_number:
+            self.ensure_no_pending_edit()
+        self.invalidate(keep_draft=True)
         self.dispatch = date.fromisoformat(self.day.get())
         self.expected_revision = self.service.latest_revision(self.dispatch)
-        self.lines = self.service.calculate(self.data, self.dispatch)
+        if self.draft_number:
+            self.lines = self.service.reconcile_draft(self.draft_number, self.data, self.draft_working)
+        else:
+            self.lines = self.service.calculate(self.data, self.dispatch)
         self.refresh()
 
     def refresh(self):
@@ -149,7 +174,28 @@ class App:
         for r in self.lines:
             projections.append(f'{LABELS[r["warehouse"]]} {r["product"]}: ' + ' / '.join(f'{day["date"]}: {day["opening_p"]} + 到着{day["transit_p"]} - 予測{day["forecast_p"]} = {day["projected_closing_p"]}P' for day in r['timeline']))
         revision_note = f'計算時の正式改訂: R{self.expected_revision:03d}。発行済みの場合、次の正式発行は全倉庫一括の差替えです。'
-        self.show('\n'.join([revision_note] + shortages(self.data, self.lines) + ['\n計算根拠（予測は確定値ではありません）'] + basis + ['\n今回補充前の日別参考値（確定在庫ではありません・日内入庫順は未確認）'] + projections + ['\n正式発行の検証結果'] + (errors or ['検証エラーなし。担当者の再確認操作が必要です。'])))
+        reference = [comparison_text(self.service.draft_comparison(self.draft_number, self.data, self.lines))] if self.draft_number else []
+        self.show('\n'.join(reference + [revision_note] + shortages(self.data, self.lines) + ['\n計算根拠（予測は確定値ではありません）'] + basis + ['\n今回補充前の日別参考値（確定在庫ではありません・日内入庫順は未確認）'] + projections + ['\n正式発行の検証結果'] + (errors or ['検証エラーなし。担当者の再確認操作が必要です。'])))
+
+    def resume_draft(self):
+        selection = self.history_list.curselection()
+        if not selection:
+            raise DataError(['再開する仮指示を履歴から選択してください'])
+        number = self.records[selection[0]][0]
+        data, lines, dispatch = self.service.resume_draft(number)
+        self.invalidate()
+        self.day.set(dispatch.isoformat())
+        self.data, self.lines = data, lines
+        self.folder = None
+        self.dispatch = dispatch
+        self.draft_number, self.draft_working = number, copy.deepcopy(lines)
+        self.expected_revision = self.service.latest_revision(dispatch)
+        self.operator.set('')
+        self.resume_info.set(f'仮指示 {number} を再開中（再取込・再計算でも手修正を保持）')
+        self.info.set(f'保存原本から復元: {number} / データ識別 {data.digest[:16]}。朝データは別途取込してください。')
+        self.display_settings()
+        self.refresh()
+        self.tabs.select(self.daily)
 
     def selected(self, _event):
         if self.lines and self.tree.selection():
@@ -194,17 +240,25 @@ class App:
         self.ack.set(False)
         self.refresh()
 
-    def issue(self, formal):
-        if not self.lines:
-            raise DataError(['再計算が必要'])
-        if self.tree.selection():
+    def ensure_no_pending_edit(self):
+        if self.lines and self.tree.selection():
             row = self.lines[int(self.tree.selection()[0])]
             if str(row['quantity_p']) != self.qty.get() or row['lot'] != self.lot.get().strip():
                 raise DataError(['編集中の数量・ロットを反映してください'])
-        payload = self.service.issue(self.data, self.lines, self.dispatch, self.operator.get(), formal, self.ack.get(), expected_revision=self.expected_revision)
+
+    def issue(self, formal):
+        if not self.lines:
+            raise DataError(['再計算が必要'])
+        self.ensure_no_pending_edit()
+        payload = self.service.issue(self.data, self.lines, self.dispatch, self.operator.get(), formal, self.ack.get(), expected_revision=self.expected_revision, draft_number=self.draft_number)
         self.ack.set(False)
         if formal:
             self.invalidate()
+        elif self.draft_number:
+            self.draft_number = payload['number']
+            self.draft_working = copy.deepcopy(self.lines)
+            self.resume_info.set(f'仮指示 {self.draft_number} を再開中（再取込・再計算でも手修正を保持）')
+            self.refresh()
         self.history()
         paths = write_reports(self.service.report_payload(payload['number']), self.home / 'reports')
         for path in paths:

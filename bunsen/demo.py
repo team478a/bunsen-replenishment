@@ -27,8 +27,12 @@ def main():
                 print('PASS: 朝の現物在庫未確認では正式発行を停止')
             else:
                 raise AssertionError('朝在庫ゲート失敗')
+            service.close()
+            service = Service(Path(temp) / 'demo.db', lambda: datetime(2026, 11, 9, 9, tzinfo=JST))
+            _, working, _ = service.resume_draft(draft['number'])
             data = service.import_folder(root / 'samples/morning')
-            lines = service.calculate(data, dispatch)
+            lines = service.reconcile_draft(draft['number'], data, working)
+            print('PASS: DBを開き直して仮指示再開→朝データで数量を保持して照合')
             print('\n'.join(shortages(data, lines)))
             try:
                 for row in lines:
@@ -42,7 +46,7 @@ def main():
                 before = dict(row)
                 row.update(quantity_p=120, lot='L001')
                 service.event('edit', {'before': before, 'after': row})
-            final = service.issue(data, lines, dispatch, '架空担当者', True, True)
+            final = service.issue(data, lines, dispatch, '架空担当者', True, True, draft_number=draft['number'])
             for path in write_reports(service.report_payload(final['number']), root / 'demo-output'):
                 print(path)
             print('PASS: 取込→計算→仮指示→朝照合→不足修正→正式指示')

@@ -9,6 +9,7 @@ from datetime import date
 from pathlib import Path
 
 from .core import DataError, LABELS, WAREHOUSES, allocations, calculate, load, now_jst, units, validate
+from .planning import compare, comparison_text, overlay
 
 
 def encode(value):
@@ -53,28 +54,56 @@ class Service:
         return self.db.execute('SELECT COALESCE(MAX(revision),0) FROM issues WHERE dispatch=? AND formal=?',
                                (dispatch.isoformat(), int(formal))).fetchone()[0]
 
-    def issue(self, data, lines, dispatch, operator, formal, acknowledged=False, *, expected_revision=0):
-        # Reparse the source snapshot at issue time, including all typed values.
+    def snapshot_data(self, raw, digest=None):
         with tempfile.TemporaryDirectory() as folder:
-            for name, content in data.raw.items():
+            for name, content in raw.items():
                 if Path(name).name != name or not name.endswith('.csv'):
                     raise DataError(['取込原本のファイル名が不正'])
                 Path(folder, name).write_text(content, encoding='utf-8')
             fresh = load(folder, self.clock())
-        if fresh.digest != data.digest:
+        if digest is not None and fresh.digest != digest:
             raise DataError(['取込データが変更されています。再取込が必要'])
-        canonical = calculate(fresh, dispatch)
-        quantities = {(r['warehouse'], r['product']): r for r in lines}
-        if len(quantities) != len(lines) or set(quantities) != {(r['warehouse'], r['product']) for r in canonical}:
-            raise DataError(['全倉庫・商品明細の不一致。再計算が必要'])
-        for row in canonical:
-            edited = quantities[(row['warehouse'], row['product'])]
-            row.update(quantity_p=edited['quantity_p'], lot=edited['lot'])
-            if type(row['quantity_p']) is not int or row['quantity_p'] < 0:
-                raise DataError(['数量は0以上の整数必須'])
-            if 'allocations' in edited:
-                # Validate structure even for drafts so report rendering is safe.
-                row['allocations'] = allocations(edited)
+        return fresh
+
+    def draft(self, number, dispatch=None):
+        payload = self.report_payload(number)
+        if payload['formal']:
+            raise DataError(['正式指示は仮指示として再開できません'])
+        if payload['report_status']['superseded']:
+            raise DataError(['旧版の仮指示は再開・発行参照できません。最新の仮指示を選択してください'])
+        if dispatch is not None and payload['dispatch'] != dispatch.isoformat():
+            raise DataError(['再開元仮指示の出荷日が一致しません'])
+        return payload
+
+    def resume_draft(self, number):
+        draft = self.draft(number)
+        data = self.snapshot_data(draft['raw'], draft['digest'])
+        dispatch = date.fromisoformat(draft['dispatch'])
+        lines = overlay(calculate(data, dispatch), draft['lines'])
+        self.event('resume_draft', {'number': number, 'digest': data.digest, 'lines': lines})
+        return data, lines, dispatch
+
+    def reconcile_draft(self, number, data, working_lines=None):
+        draft = self.draft(number)
+        dispatch = date.fromisoformat(draft['dispatch'])
+        fresh = self.snapshot_data(data.raw, data.digest)
+        # Compare both the persisted reference and working copy to current keys.
+        current = calculate(fresh, dispatch)
+        overlay(current, draft['lines'])
+        lines = overlay(current, draft['lines'] if working_lines is None else working_lines)
+        reference = compare(draft, fresh, lines)
+        self.event('reconcile_draft', {'reference': reference, 'lines': lines})
+        return lines
+
+    def draft_comparison(self, number, data, lines):
+        return compare(self.draft(number), data, lines)
+
+    def issue(self, data, lines, dispatch, operator, formal, acknowledged=False, *, expected_revision=0, draft_number=None):
+        # Reparse all typed values and recompute evidence, never reuse saved checks.
+        fresh = self.snapshot_data(data.raw, data.digest)
+        canonical = overlay(calculate(fresh, dispatch), lines)
+        source = self.draft(draft_number, dispatch) if draft_number else None
+        reference = compare(source, fresh, canonical) if source else None
         errors = validate(fresh, canonical, dispatch, self.clock())
         if formal and (not operator.strip() or not acknowledged):
             errors.append('担当者名と実ロット・期限・積載の再確認操作が必要')
@@ -85,8 +114,12 @@ class Service:
         payload = {'digest': fresh.digest, 'raw': fresh.raw, 'tables': fresh.tables,
                    'lines': canonical, 'operator': operator, 'formal': formal,
                    'validation': errors, 'dispatch': dispatch.isoformat(), 'at': at}
+        if reference:
+            payload['source_draft'] = reference
         try:
             self.db.execute('BEGIN IMMEDIATE')
+            if source and self.latest_revision(dispatch, False) != source['revision']:
+                raise DataError(['再開元の仮指示が更新されました。最新の仮指示を再開し、再確認してください'])
             current = self.latest_revision(dispatch, formal)
             if formal and (type(expected_revision) is not int or expected_revision != current):
                 raise DataError([f'出荷日={dispatch}: 正式指示の改訂が更新されています（計算時={expected_revision}、現在={current}）。再計算・再確認が必要です'])
@@ -188,6 +221,7 @@ def report_html(payload, warehouse):
 <p style="border:3px solid {status_color};padding:12px;font-size:18px;font-weight:bold">{esc(revision_notice)}</p>
 <p>発行番号 {esc(payload['number'])}／改訂 {payload['revision']}／担当者 {esc(payload['operator'] or '未確認')}<br>
 発行時刻 {esc(payload['at'])}／データ識別 {esc(payload['digest'][:16])}</p>
+{('<h2>仮指示との照合</h2><p>' + esc(comparison_text(payload['source_draft'], warehouse)).replace(chr(10), '<br>') + '</p>') if payload.get('source_draft') else ''}
 <p>同日正式指示は全倉庫一括の改訂差替えです。最新版を履歴画面で確認し、旧帳票を回収してください。追加出荷には使用できません。保存済みHTML・紙・PDFの改訂表示は自動更新されません。</p>
 <button onclick="window.print()">印刷・PDFに保存</button>
 <table><thead><tr>{''.join('<th>'+v+'</th>' for v in ['商品','品名','数量P','単位','実ロット','賞味期限','出荷日','到着予定日'])}</tr></thead>
