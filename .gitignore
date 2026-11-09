@@ -9,3 +9,6 @@ output/
 .venv/
 dist/
 build/
+*.zip
+restored-*/
+view-output/

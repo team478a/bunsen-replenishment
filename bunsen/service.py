@@ -19,8 +19,20 @@ def encode(value):
 class Service:
     def __init__(self, db_path, clock=now_jst):
         self.clock = clock
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(db_path, timeout=10)
+        self.db_path = Path(db_path).resolve()
+        self.read_only = (self.db_path.parent / 'restore-info.json').exists()
+        if self.read_only:
+            from .backup import validate_database
+            self.db = sqlite3.connect(self.db_path.as_uri() + '?mode=ro', uri=True, timeout=10)
+            try:
+                self.db.execute('PRAGMA query_only=ON')
+                validate_database(self.db)
+            except Exception:
+                self.db.close()
+                raise
+            return
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.db = sqlite3.connect(self.db_path, timeout=10)
         self.db.execute('CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, at TEXT NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL)')
         self.db.execute('''CREATE TABLE IF NOT EXISTS issues (
             id INTEGER PRIMARY KEY, dispatch TEXT NOT NULL, revision INTEGER NOT NULL,
@@ -31,12 +43,18 @@ class Service:
     def close(self):
         self.db.close()
 
+    def ensure_writable(self):
+        if self.read_only:
+            raise DataError(['復元履歴は閲覧専用です。取込・計算保存・再開・編集保存・新規発行はできません。通常データへ戻ってください'])
+
     def event(self, kind, payload):
+        self.ensure_writable()
         with self.db:
             self.db.execute('INSERT INTO events(at,kind,payload) VALUES(?,?,?)',
                             (self.clock().isoformat(), kind, encode(payload)))
 
     def import_folder(self, folder):
+        self.ensure_writable()
         try:
             data = load(folder, self.clock())
         except DataError as exc:
@@ -46,6 +64,7 @@ class Service:
         return data
 
     def calculate(self, data, dispatch):
+        self.ensure_writable()
         lines = calculate(data, dispatch)
         self.event('calculate', {'digest': data.digest, 'dispatch': dispatch.isoformat(), 'lines': lines})
         return lines
@@ -76,6 +95,7 @@ class Service:
         return payload
 
     def resume_draft(self, number):
+        self.ensure_writable()
         draft = self.draft(number)
         data = self.snapshot_data(draft['raw'], draft['digest'])
         dispatch = date.fromisoformat(draft['dispatch'])
@@ -84,6 +104,7 @@ class Service:
         return data, lines, dispatch
 
     def reconcile_draft(self, number, data, working_lines=None):
+        self.ensure_writable()
         draft = self.draft(number)
         dispatch = date.fromisoformat(draft['dispatch'])
         fresh = self.snapshot_data(data.raw, data.digest)
@@ -99,6 +120,7 @@ class Service:
         return compare(self.draft(number), data, lines)
 
     def issue(self, data, lines, dispatch, operator, formal, acknowledged=False, *, expected_revision=0, draft_number=None):
+        self.ensure_writable()
         # Reparse all typed values and recompute evidence, never reuse saved checks.
         fresh = self.snapshot_data(data.raw, data.digest)
         canonical = overlay(calculate(fresh, dispatch), lines)
@@ -160,6 +182,8 @@ class Service:
         payload = json.loads(row[0])
         payload['report_status'] = {'latest_number': row[1], 'superseded': row[1] != number,
                                     'checked_at': self.clock().isoformat()}
+        if self.read_only:
+            payload['restored_view'] = True
         return payload
 
 
@@ -218,6 +242,7 @@ def report_html(payload, warehouse):
     return f'''<!doctype html><html lang="ja"><meta charset="utf-8"><title>{esc(title)} {esc(payload['number'])}</title>
 <style>body{{font-family:Meiryo,sans-serif;font-size:14px;margin:24px}}h1{{color:{'#174d37' if formal else '#9b5200'}}}table{{border-collapse:collapse;width:100%}}td,th{{border:1px solid #777;padding:7px}}.basis{{font-size:12px;background:#f3f3f3}}@media print{{button{{display:none}}body{{margin:0}}}}</style>
 <h1>{esc(title)} — {esc(LABELS[warehouse])}</h1><p>{esc(status)}</p>
+{'<p style="border:4px solid #9b2600;padding:12px;font-size:22px;font-weight:bold">復元履歴の参考帳票 — 実出荷に使用しない。改訂照合は復元時点の履歴内のみです。</p>' if payload.get('restored_view') else ''}
 <p style="border:3px solid {status_color};padding:12px;font-size:18px;font-weight:bold">{esc(revision_notice)}</p>
 <p>発行番号 {esc(payload['number'])}／改訂 {payload['revision']}／担当者 {esc(payload['operator'] or '未確認')}<br>
 発行時刻 {esc(payload['at'])}／データ識別 {esc(payload['digest'][:16])}</p>

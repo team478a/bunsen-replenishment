@@ -5,6 +5,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 from .core import DataError, JST, shortages
+from .backup import create_backup, restore_backup
 from .service import Service, write_reports
 
 
@@ -50,6 +51,22 @@ def main():
             for path in write_reports(service.report_payload(final['number']), root / 'demo-output'):
                 print(path)
             print('PASS: 取込→計算→仮指示→朝照合→不足修正→正式指示')
+            write_reports(service.report_payload(final['number']), Path(temp) / 'reports')
+            with tempfile.TemporaryDirectory(prefix='bunsen-demo-recovery-') as recovery:
+                archive = Path(recovery) / 'sample.zip'
+                manifest = create_backup(service.db, temp, archive, service.clock)
+                restored = restore_backup(archive, Path(recovery) / 'restored', manifest['archive_sha256'], service.clock)
+                view = Service(restored / 'history.db', service.clock)
+                try:
+                    assert view.get_issue(final['number']) == final
+                    try:
+                        view.issue(data, lines, dispatch, '架空担当者', True, True)
+                    except DataError:
+                        print('PASS: バックアップ→新規復元→履歴照合・閲覧専用の発行防止')
+                    else:
+                        raise AssertionError('復元履歴の発行防止失敗')
+                finally:
+                    view.close()
             multi = Service(Path(temp) / 'multi-lot.db', service.clock)
             try:
                 data = multi.import_folder(root / 'samples/multi_lot')
