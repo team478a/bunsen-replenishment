@@ -18,6 +18,7 @@ class App:
         self.data = None
         self.lines = None
         self.dispatch = None
+        self.expected_revision = None
         self.home = Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'BunsenReplenishment'
         self.service = Service(self.home / 'history.db')
         root.title('ブンセン 補充出荷指示 — サンプル仕様')
@@ -65,7 +66,7 @@ class App:
         self.operator = tk.StringVar()
         ttk.Entry(author, textvariable=self.operator, width=16).pack(side='left', padx=5)
         self.ack = tk.BooleanVar(value=False)
-        ttk.Checkbutton(author, text='実ロット・期限・専用車両積載を再確認した', variable=self.ack).pack(side='left')
+        ttk.Checkbutton(author, text='実ロット・期限・積載・改訂差替えを再確認した', variable=self.ack).pack(side='left')
         buttons = ttk.Frame(daily)
         buttons.pack(fill='x', pady=10)
         ttk.Button(buttons, text='4 仮指示書を出力', command=lambda: self.run(lambda: self.issue(False))).pack(side='left', padx=5)
@@ -100,6 +101,7 @@ class App:
 
     def invalidate(self):
         self.lines = None
+        self.expected_revision = None
         self.ack.set(False)
         self.tree.delete(*self.tree.get_children())
         self.show('条件が変更されました。再計算が必要です。')
@@ -125,6 +127,7 @@ class App:
             raise DataError(['データ取込が必要'])
         self.invalidate()
         self.dispatch = date.fromisoformat(self.day.get())
+        self.expected_revision = self.service.latest_revision(self.dispatch)
         self.lines = self.service.calculate(self.data, self.dispatch)
         self.refresh()
 
@@ -135,7 +138,11 @@ class App:
             self.tree.insert('', 'end', iid=str(i), values=(LABELS[row['warehouse']], row['product'], row['suggested_p'], row['quantity_p'], units(row['quantity_p'], products[row['product']]), row['lot'] or '未確認', row['arrival']))
         errors = validate(self.data, self.lines, self.dispatch)
         basis = [f'{LABELS[r["warehouse"]]} {r["product"]}: 在庫{r["inventory_p"]}P ({r["inventory_as_of"]}) + 輸送中{r["transit_p"]}P - 到着前予測{r["before_p"]}P / 対象予測{r["demand_p"]}P + 安全在庫{r["safety_p"]}P → 必要{r["required_p"]}P → {r["rounding"]}推奨{r["suggested_p"]}P\n予測基準: {", ".join(r["forecast_as_of"])} / 輸送中確認: {r["transit_checked_at"]} {r["warning"]}' for r in self.lines]
-        self.show('\n'.join(shortages(self.data, self.lines) + ['\n計算根拠（予測は確定値ではありません）'] + basis + ['\n正式発行の検証結果'] + (errors or ['検証エラーなし。担当者の再確認操作が必要です。'])))
+        projections = []
+        for r in self.lines:
+            projections.append(f'{LABELS[r["warehouse"]]} {r["product"]}: ' + ' / '.join(f'{day["date"]}: {day["opening_p"]} + 到着{day["transit_p"]} - 予測{day["forecast_p"]} = {day["projected_closing_p"]}P' for day in r['timeline']))
+        revision_note = f'計算時の正式改訂: R{self.expected_revision:03d}。発行済みの場合、次の正式発行は全倉庫一括の差替えです。'
+        self.show('\n'.join([revision_note] + shortages(self.data, self.lines) + ['\n計算根拠（予測は確定値ではありません）'] + basis + ['\n今回補充前の日別参考値（確定在庫ではありません・日内入庫順は未確認）'] + projections + ['\n正式発行の検証結果'] + (errors or ['検証エラーなし。担当者の再確認操作が必要です。'])))
 
     def selected(self, _event):
         if self.lines and self.tree.selection():
@@ -162,10 +169,12 @@ class App:
             row = self.lines[int(self.tree.selection()[0])]
             if str(row['quantity_p']) != self.qty.get() or row['lot'] != self.lot.get().strip():
                 raise DataError(['編集中の数量・ロットを反映してください'])
-        payload = self.service.issue(self.data, self.lines, self.dispatch, self.operator.get(), formal, self.ack.get())
+        payload = self.service.issue(self.data, self.lines, self.dispatch, self.operator.get(), formal, self.ack.get(), expected_revision=self.expected_revision)
         self.ack.set(False)
+        if formal:
+            self.invalidate()
         self.history()
-        paths = write_reports(payload, self.home / 'reports')
+        paths = write_reports(self.service.report_payload(payload['number']), self.home / 'reports')
         for path in paths:
             webbrowser.open(path.as_uri())
         self.info.set(f'{payload["number"]} 発行済み。ブラウザーの印刷からPDF保存できます。')
@@ -173,15 +182,19 @@ class App:
     def history(self):
         self.records = self.service.history()
         self.history_list.delete(0, 'end')
+        seen = set()
         for number, at, formal in self.records:
-            self.history_list.insert('end', f'{number} | {"正式" if formal else "仮"} | {at}')
+            group = number.rsplit('-R', 1)[0]
+            status = '旧版・差替え済み' if group in seen else '最新改訂'
+            seen.add(group)
+            self.history_list.insert('end', f'{number} | {"正式" if formal else "仮"} | {status} | {at}')
 
     def reprint(self):
         selection = self.history_list.curselection()
         if not selection:
             raise DataError(['履歴を選択してください'])
         number = self.records[selection[0]][0]
-        for path in write_reports(self.service.get_issue(number), self.home / 'reports'):
+        for path in write_reports(self.service.report_payload(number), self.home / 'reports'):
             webbrowser.open(path.as_uri())
 
     def close(self):

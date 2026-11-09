@@ -20,7 +20,7 @@ def main():
             data = service.import_folder(root / 'samples/before_morning')
             lines = service.calculate(data, dispatch)
             draft = service.issue(data, lines, dispatch, '架空担当者', False)
-            write_reports(draft, root / 'demo-output')
+            write_reports(service.report_payload(draft['number']), root / 'demo-output')
             try:
                 service.issue(data, lines, dispatch, '架空担当者', True, True)
             except DataError:
@@ -43,7 +43,7 @@ def main():
                 row.update(quantity_p=120, lot='L001')
                 service.event('edit', {'before': before, 'after': row})
             final = service.issue(data, lines, dispatch, '架空担当者', True, True)
-            for path in write_reports(final, root / 'demo-output'):
+            for path in write_reports(service.report_payload(final['number']), root / 'demo-output'):
                 print(path)
             print('PASS: 取込→計算→仮指示→朝照合→不足修正→正式指示')
         finally:

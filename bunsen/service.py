@@ -49,7 +49,11 @@ class Service:
         self.event('calculate', {'digest': data.digest, 'dispatch': dispatch.isoformat(), 'lines': lines})
         return lines
 
-    def issue(self, data, lines, dispatch, operator, formal, acknowledged=False):
+    def latest_revision(self, dispatch, formal=True):
+        return self.db.execute('SELECT COALESCE(MAX(revision),0) FROM issues WHERE dispatch=? AND formal=?',
+                               (dispatch.isoformat(), int(formal))).fetchone()[0]
+
+    def issue(self, data, lines, dispatch, operator, formal, acknowledged=False, *, expected_revision=0):
         # Reparse the source snapshot at issue time, including all typed values.
         with tempfile.TemporaryDirectory() as folder:
             for name, content in data.raw.items():
@@ -80,14 +84,22 @@ class Service:
                    'validation': errors, 'dispatch': dispatch.isoformat(), 'at': at}
         try:
             self.db.execute('BEGIN IMMEDIATE')
-            revision = self.db.execute('SELECT COALESCE(MAX(revision),0)+1 FROM issues WHERE dispatch=? AND formal=?',
-                                       (dispatch.isoformat(), int(formal))).fetchone()[0]
+            current = self.latest_revision(dispatch, formal)
+            if formal and (type(expected_revision) is not int or expected_revision != current):
+                raise DataError([f'出荷日={dispatch}: 正式指示の改訂が更新されています（計算時={expected_revision}、現在={current}）。再計算・再確認が必要です'])
+            revision = current + 1
+            payload['replaces_number'] = f'F-{dispatch:%Y%m%d}-R{current:03d}' if formal and current else None
             number = f'{"F" if formal else "P"}-{dispatch:%Y%m%d}-R{revision:03d}'
             payload.update(number=number, revision=revision)
             self.db.execute('INSERT INTO issues(dispatch,revision,formal,number,at,payload) VALUES(?,?,?,?,?,?)',
                             (dispatch.isoformat(), revision, int(formal), number, at, encode(payload)))
             self.db.execute('INSERT INTO events(at,kind,payload) VALUES(?,?,?)', (at, 'issue', encode(payload)))
             self.db.commit()
+        except DataError as exc:
+            self.db.rollback()
+            self.event('issue_blocked', {'digest': fresh.digest, 'lines': canonical,
+                                         'expected_revision': expected_revision, 'errors': exc.errors})
+            raise
         except Exception:
             self.db.rollback()
             raise
@@ -102,11 +114,33 @@ class Service:
             raise DataError(['発行履歴がありません'])
         return json.loads(row[0])
 
+    def report_payload(self, number):
+        """Add current status without modifying the immutable issuance snapshot."""
+        row = self.db.execute('''SELECT old.payload, latest.number FROM issues old
+            JOIN issues latest ON latest.dispatch=old.dispatch AND latest.formal=old.formal
+            WHERE old.number=? ORDER BY latest.revision DESC LIMIT 1''', (number,)).fetchone()
+        if row is None:
+            raise DataError(['発行履歴がありません'])
+        payload = json.loads(row[0])
+        payload['report_status'] = {'latest_number': row[1], 'superseded': row[1] != number,
+                                    'checked_at': self.clock().isoformat()}
+        return payload
+
 
 def report_html(payload, warehouse):
     esc = lambda v: html.escape(str(v), quote=True)
     formal = payload['formal']
     title = '正式出荷指示書' if formal else '仮出荷指示書'
+    revision_status = payload.get('report_status')
+    if revision_status is None:
+        revision_notice = '現行改訂は未照合。出荷前にアプリの発行履歴で最新版を確認してください。'
+    elif revision_status['superseded']:
+        revision_notice = f'旧版・差替え済み — 出荷に使用しない。現行番号: {revision_status["latest_number"]}'
+    else:
+        revision_notice = f'履歴照合時点の最新改訂: {revision_status["latest_number"]}'
+    if revision_status:
+        revision_notice += f'（照合日時: {revision_status["checked_at"]}）'
+    status_color = '#174d37' if revision_status and not revision_status['superseded'] else '#9b2600'
     products = {r['product']: r for r in payload['tables']['products']}
     stocks = {(r['product'], r['lot']): r for r in payload['tables']['dry_stock']}
     body = []
@@ -126,15 +160,20 @@ def report_html(payload, warehouse):
         if stock:
             basis += f' 現物確認 {stock["checked_at"]}／{stock["checker"]}'
         body.append(f'<tr><td colspan="8" class="basis">{esc(basis)}</td></tr>')
+        timeline = row.get('timeline', [])
+        if timeline:
+            projection = ' / '.join(f'{r["date"]}: 始業予測残高 {r["opening_p"]}P + 輸送中到着 {r["transit_p"]}P - 需要予測 {r["forecast_p"]}P = 終業予測残高 {r["projected_closing_p"]}P' for r in timeline)
+            body.append(f'<tr><td colspan="8" class="basis">今回補充前の日別参考値（確定在庫ではありません・日内の入庫順は未確認）: {esc(projection)}</td></tr>')
     status = ('担当者による実ロット・期限・専用車両重量の再確認済み。'
               if formal else '乾麺倉庫の当日在庫確認前。期限・積載等は以下の検証結果を参照。')
     warnings = '<br>'.join(esc(e) for e in payload['validation']) or '検証エラーなし'
     return f'''<!doctype html><html lang="ja"><meta charset="utf-8"><title>{esc(title)} {esc(payload['number'])}</title>
 <style>body{{font-family:Meiryo,sans-serif;font-size:14px;margin:24px}}h1{{color:{'#174d37' if formal else '#9b5200'}}}table{{border-collapse:collapse;width:100%}}td,th{{border:1px solid #777;padding:7px}}.basis{{font-size:12px;background:#f3f3f3}}@media print{{button{{display:none}}body{{margin:0}}}}</style>
 <h1>{esc(title)} — {esc(LABELS[warehouse])}</h1><p>{esc(status)}</p>
+<p style="border:3px solid {status_color};padding:12px;font-size:18px;font-weight:bold">{esc(revision_notice)}</p>
 <p>発行番号 {esc(payload['number'])}／改訂 {payload['revision']}／担当者 {esc(payload['operator'] or '未確認')}<br>
 発行時刻 {esc(payload['at'])}／データ識別 {esc(payload['digest'][:16])}</p>
-<p>同日正式指示は全倉庫一括の改訂差替えです。最新版を履歴画面で確認し、旧帳票を回収してください。追加出荷には使用できません。</p>
+<p>同日正式指示は全倉庫一括の改訂差替えです。最新版を履歴画面で確認し、旧帳票を回収してください。追加出荷には使用できません。保存済みHTML・紙・PDFの改訂表示は自動更新されません。</p>
 <button onclick="window.print()">印刷・PDFに保存</button>
 <table><thead><tr>{''.join('<th>'+v+'</th>' for v in ['商品','品名','数量P','単位','実ロット','賞味期限','出荷日','到着予定日'])}</tr></thead>
 <tbody>{''.join(body)}</tbody></table><h2>検証結果</h2><p>{warnings}</p>

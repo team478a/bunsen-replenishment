@@ -59,6 +59,13 @@ def stamp(value):
 def load(folder, now=None):
     now = now or now_jst()
     tables, raw, errors = {}, {}, []
+    folder = Path(folder)
+    if not folder.is_dir():
+        raise DataError([f'{folder}: CSVフォルダーが存在しません'])
+    allowed = {table + '.csv' for table in SCHEMA}
+    for path in sorted(folder.iterdir()):
+        if path.suffix.lower() == '.csv' and path.name not in allowed:
+            errors.append(f'{path.name}: 未対応CSV。仮データ契約外のため取込停止')
     for table, columns in SCHEMA.items():
         path = Path(folder) / (table + '.csv')
         if not path.exists():
@@ -182,6 +189,7 @@ def calculate(data, dispatch):
                 demand += row['quantity_p']
             day += timedelta(days=1)
         transit = 0
+        receipts = {}
         for r in t['transit']:
             if (r['warehouse'], r['product']) == (w, p):
                 day = date.fromisoformat(r['arrival_date'])
@@ -189,6 +197,28 @@ def calculate(data, dispatch):
                     errors.append(f'{context}: 輸送中 {r["shipment_id"]} は在庫基準日以前到着（二重計上疑い）')
                 elif day <= arrival:
                     transit += r['quantity_p']
+                    receipts[day] = receipts.get(day, 0) + r['quantity_p']
+        # Preserve the aggregate replenishment formula while exposing timing risk.
+        # A receipt on arrival day must not conceal a deficit on an earlier day.
+        timeline, balance = [], inv['quantity_p']
+        day = start
+        while day <= arrival:
+            opening = balance
+            receipt = receipts.get(day, 0)
+            predicted = forecasts.get(day.isoformat(), {}).get('quantity_p')
+            if predicted is not None:
+                balance += receipt - predicted
+                timeline.append(dict(date=day.isoformat(), opening_p=opening,
+                                     transit_p=receipt, forecast_p=predicted,
+                                     projected_closing_p=balance))
+            day += timedelta(days=1)
+        risk_days = [r['date'] for r in timeline if r['date'] < arrival.isoformat() and r['projected_closing_p'] < 0]
+        timing_days = [r['date'] for r in timeline if r['transit_p'] > 0 and r['opening_p'] - r['forecast_p'] < 0]
+        warnings = []
+        if risk_days:
+            warnings.append(f'到着前の不足リスク（予測日別残高）: {", ".join(risk_days)}')
+        if timing_days:
+            warnings.append(f'輸送中の入庫時刻と需要発生順は未確認: {", ".join(timing_days)}')
         available = inv['quantity_p'] + transit - before
         need = max(0, demand + policy['safety_p'] - available)
         multiple = unit_p(products[p])
@@ -199,7 +229,7 @@ def calculate(data, dispatch):
                           transit_checked_at=policy['transit_checked_at'], transit_p=transit,
                           before_p=before, demand_p=demand, safety_p=policy['safety_p'],
                           required_p=need, suggested_p=adjusted, quantity_p=adjusted, lot='',
-                          warning='到着前の不足リスク' if available < 0 else '',
+                          warning=' / '.join(warnings), timeline=timeline,
                           rounding=policy['rounding'], unit_p=multiple))
     if errors:
         raise DataError(errors)
