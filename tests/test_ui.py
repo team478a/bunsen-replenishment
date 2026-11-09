@@ -45,3 +45,35 @@ class UITests(unittest.TestCase):
                     error.assert_called_once()
             finally:
                 app.close()
+
+    def test_formal_issue_requires_recompute_and_old_report_is_marked(self):
+        fixed_now = datetime(2026, 11, 9, 9, tzinfo=JST)
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {'LOCALAPPDATA': folder}), patch('bunsen.ui.webbrowser.open') as browser:
+            root = tk.Tk()
+            root.withdraw()
+            app = App(root)
+            app.service.clock = lambda: fixed_now
+            try:
+                app.data = load(ROOT / 'samples/morning', fixed_now)
+                app.day.set('2026-11-09')
+                app.operator.set('架空担当者')
+                for revision in (1, 2):
+                    app.compute()
+                    self.assertEqual(app.expected_revision, revision - 1)
+                    for line in app.lines:
+                        line.update(quantity_p=120, lot='L001')
+                    app.ack.set(True)
+                    app.issue(True)
+                    self.assertIsNone(app.lines)
+                    self.assertIsNone(app.expected_revision)
+                    self.assertFalse(app.ack.get())
+                    self.assertEqual(len(app.tree.get_children()), 0)
+                self.assertIn('最新改訂', app.history_list.get(0))
+                self.assertIn('旧版・差替え済み', app.history_list.get(1))
+                app.history_list.selection_set(1)
+                app.reprint()
+                report = app.home / 'reports/F-20261109-R001-KOBE.html'
+                self.assertIn('旧版・差替え済み — 出荷に使用しない', report.read_text(encoding='utf-8'))
+                self.assertEqual(browser.call_count, 6)
+            finally:
+                app.close()

@@ -184,7 +184,7 @@ class WorkflowTests(unittest.TestCase):
     def test_revision_and_revalidation_after_edit(self):
         data, lines = self.valid()
         first = self.service.issue(data, lines, DAY, '担当者', True, True)
-        second = self.service.issue(data, lines, DAY, '担当者', True, True)
+        second = self.service.issue(data, lines, DAY, '担当者', True, True, expected_revision=first['revision'])
         self.assertEqual(second['revision'], first['revision'] + 1)
         lines[0]['quantity_p'] = 240
         with self.assertRaises(DataError):
