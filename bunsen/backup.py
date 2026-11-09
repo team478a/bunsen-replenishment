@@ -310,7 +310,7 @@ def restore_backup(archive_path, parent, expected_sha256=None, clock=now_jst):
         return final
 
 
-def main():
+def main(argv=None):
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, 'reconfigure'):
             stream.reconfigure(encoding='utf-8')
@@ -324,7 +324,7 @@ def main():
     restore = sub.add_parser('restore')
     restore.add_argument('archive', type=Path)
     restore.add_argument('parent', type=Path)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     try:
         if args.action == 'create':
             with closing(sqlite3.connect((args.data_home.resolve() / 'history.db').as_uri() + '?mode=ro', uri=True)) as db:
