@@ -158,6 +158,36 @@ def units(quantity, product):
     return f'{pl} PL + {cases} 甲' + (f' + {packs} P（端数）' if packs else '')
 
 
+def allocations(line):
+    """Read a split instruction or a legacy single-lot instruction, without inference."""
+    if 'allocations' not in line:
+        return [{'lot': line['lot'], 'quantity_p': line['quantity_p']}] if line['quantity_p'] else []
+    if line.get('lot'):
+        raise DataError(['単一ロットと複数ロットの併用はできません'])
+    rows = line['allocations']
+    if not isinstance(rows, list):
+        raise DataError(['ロット別割当はリストで指定してください'])
+    for row in rows:
+        if not isinstance(row, dict) or set(row) != {'lot', 'quantity_p'}:
+            raise DataError(['ロット別割当の項目はlotとquantity_pのみです'])
+        if not isinstance(row['lot'], str):
+            raise DataError(['ロット名は文字列で指定してください'])
+        if type(row['quantity_p']) is not int or row['quantity_p'] <= 0:
+            raise DataError(['ロット別数量Pは正整数必須（ゼロは行を削除）'])
+    return [dict(row) for row in rows]
+
+
+def allocation_label(line):
+    if 'allocations' not in line:
+        return line['lot'] or '未確認'
+    rows = allocations(line)
+    total = sum(r['quantity_p'] for r in rows)
+    summary = ' / '.join(f'{r["lot"] or "未確認"}: {r["quantity_p"]}P' for r in rows) or '未割当'
+    if total != line['quantity_p']:
+        summary += f'（合計不一致: 割当{total}P／指示{line["quantity_p"]}P）'
+    return summary
+
+
 def calculate(data, dispatch):
     t, lines, errors = data.tables, [], []
     products = {r['product']: r for r in t['products']}
@@ -276,19 +306,33 @@ def validate(data, lines, dispatch, now=None):
         vehicle = next(r for r in t['vehicles'] if r['warehouse'] == w and r['product'] == p)
         if qty * product['weight_g'] > vehicle['capacity_g']:
             errors.append(f'{context}: 積載超過 {qty * product["weight_g"]}>{vehicle["capacity_g"]}g')
-        if qty == 0:
+        try:
+            assigned = allocations(line)
+        except DataError as exc:
+            errors.extend(f'{context}: {e}' for e in exc.errors)
             continue
-        key = (p, line['lot'])
-        stock = stocks.get(key)
-        if stock is None:
-            errors.append(f'{context}: 実ロット未確認 {line["lot"]}')
-            continue
-        used[key] = used.get(key, 0) + qty
+        total = sum(r['quantity_p'] for r in assigned)
+        if total != qty:
+            errors.append(f'{context}: ロット別数量の合計不一致 割当={total}P 指示={qty}P')
+        seen_lots = set()
         policy = next(r for r in t['policies'] if r['warehouse'] == w and r['product'] == p)
         original = next(r for r in expected if (r['warehouse'], r['product']) == (w, p))
         basis = dispatch if policy['expiry_basis'] == 'shipment' else date.fromisoformat(original['arrival'])
-        if (date.fromisoformat(stock['best_before']) - basis).days < product['min_remaining_days']:
-            errors.append(f'{context} ロット={line["lot"]}: 期限違反（基準日={basis}）')
+        for allocation in assigned:
+            lot, amount = allocation['lot'], allocation['quantity_p']
+            if lot in seen_lots:
+                errors.append(f'{context} ロット={lot}: 同一明細内のロット重複')
+            seen_lots.add(lot)
+            if amount % case_p(product):
+                errors.append(f'{context} ロット={lot}: 甲単位の端数積付は禁止')
+            key = (p, lot)
+            stock = stocks.get(key)
+            if stock is None:
+                errors.append(f'{context}: 実ロット未確認 {lot}')
+                continue
+            used[key] = used.get(key, 0) + amount
+            if (date.fromisoformat(stock['best_before']) - basis).days < product['min_remaining_days']:
+                errors.append(f'{context} ロット={lot}: 期限違反（基準日={basis}）')
     for key, qty in used.items():
         if qty > stocks[key]['quantity_p']:
             errors.append(f'乾麺倉庫 商品={key[0]} ロット={key[1]}: 二重割当／不足 {qty - stocks[key]["quantity_p"]} P')

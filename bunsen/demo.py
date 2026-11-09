@@ -46,6 +46,20 @@ def main():
             for path in write_reports(service.report_payload(final['number']), root / 'demo-output'):
                 print(path)
             print('PASS: 取込→計算→仮指示→朝照合→不足修正→正式指示')
+            multi = Service(Path(temp) / 'multi-lot.db', service.clock)
+            try:
+                data = multi.import_folder(root / 'samples/multi_lot')
+                lines = multi.calculate(data, dispatch)
+                for row in lines:
+                    before = dict(row)
+                    row.update(quantity_p=120, lot='', allocations=[{'lot': 'L001', 'quantity_p': 72}, {'lot': 'L002', 'quantity_p': 48}])
+                    multi.event('edit', {'before': before, 'after': row})
+                final = multi.issue(data, lines, dispatch, '架空担当者', True, True)
+                for path in write_reports(multi.report_payload(final['number']), root / 'demo-output/multi-lot'):
+                    print(path)
+                print('PASS: 複数ロット分割（各倉庫L001=72P＋L002=48P）→正式指示')
+            finally:
+                multi.close()
         finally:
             service.close()
 

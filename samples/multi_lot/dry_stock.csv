@@ -1,0 +1,3 @@
+product,lot,quantity_p,best_before,checked_at,checker,source,confirmed
+P001,L001,144,2027-06-30,2026-11-09T07:00:00+09:00,架空担当者,physical,yes
+P001,L002,96,2027-07-31,2026-11-09T07:00:00+09:00,架空担当者,physical,yes
