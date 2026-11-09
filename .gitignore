@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+*.db
+*.db-*
+demo-output/
+data/
+output/
+.env*
+.venv/
+dist/
+build/

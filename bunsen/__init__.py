@@ -1,0 +1,1 @@
+"""Local CSV replenishment application."""

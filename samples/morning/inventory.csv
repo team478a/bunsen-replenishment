@@ -1,0 +1,3 @@
+warehouse,product,quantity_p,as_of,confirmed
+KOBE,P001,0,2026-11-08T08:00:00+09:00,yes
+SUGITO,P001,0,2026-11-08T08:00:00+09:00,yes
