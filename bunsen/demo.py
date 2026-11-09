@@ -1,5 +1,6 @@
 """Fixed-date, fictional full workflow; never writes production history."""
 import tempfile
+import sys
 from datetime import date, datetime
 from pathlib import Path
 
@@ -8,6 +9,9 @@ from .service import Service, write_reports
 
 
 def main():
+    # Windows CI and English Windows may otherwise use cp1252 for redirected logs.
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8')
     root = Path(__file__).resolve().parent.parent
     dispatch = date(2026, 11, 9)
     with tempfile.TemporaryDirectory() as temp:

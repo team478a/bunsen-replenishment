@@ -3,11 +3,11 @@ import os
 import tempfile
 import tkinter as tk
 import unittest
-from datetime import date
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
-from bunsen.core import load
+from bunsen.core import JST, load
 from bunsen.ui import App
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -20,7 +20,7 @@ class UITests(unittest.TestCase):
             root.withdraw()
             app = App(root)
             try:
-                app.data = load(ROOT / 'samples/morning')
+                app.data = load(ROOT / 'samples/morning', datetime(2026, 11, 9, 9, tzinfo=JST))
                 app.day.set('2026-11-09')
                 app.compute()
                 root.update()
