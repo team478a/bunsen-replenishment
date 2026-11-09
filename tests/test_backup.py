@@ -1,6 +1,7 @@
 from contextlib import closing
 import hashlib
 import json
+import os
 from pathlib import Path
 import sqlite3
 import stat
@@ -299,8 +300,9 @@ class BackupTests(unittest.TestCase):
             result = subprocess.run(command, cwd=ROOT, capture_output=True, encoding='utf-8', timeout=30)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIsInstance(json.loads(result.stdout), dict)
-        help_result = subprocess.run([sys.executable, '-m', 'bunsen', '--help'], cwd=ROOT, capture_output=True, timeout=30)
-        self.assertEqual(help_result.returncode, 0)
+        help_result = subprocess.run([sys.executable, '-m', 'bunsen', '--help'], cwd=ROOT, capture_output=True, timeout=30, env=dict(os.environ, PYTHONIOENCODING='cp1252'))
+        self.assertEqual(help_result.returncode, 0, help_result.stderr.decode('utf-8', errors='replace'))
+        self.assertIn(b'--data-dir', help_result.stdout)
 
     def test_empty_database_and_legacy_snapshots_remain_supported(self):
         empty_home = self.root / 'empty'

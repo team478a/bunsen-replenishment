@@ -3,6 +3,7 @@ import copy
 import json
 import os
 import sqlite3
+import sys
 import tkinter as tk
 import webbrowser
 from datetime import date
@@ -419,6 +420,9 @@ class App:
 
 
 def main():
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, 'reconfigure'):
+            stream.reconfigure(encoding='utf-8')
     parser = argparse.ArgumentParser(description='ブンセン 補充出荷指示')
     parser.add_argument('--data-dir', type=Path, help='データフォルダー（復元履歴は自動的に閲覧専用）')
     args = parser.parse_args()
