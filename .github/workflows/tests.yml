@@ -1,12 +1,43 @@
 name: Tests
-on: [push, pull_request]
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
 jobs:
   test:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - run: python -m unittest discover -s tests -v
       - run: python -m bunsen.demo
+  package:
+    name: Windows package
+    needs: test
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - run: python -m pip install -r requirements-build.txt
+      - run: python scripts/build_windows.py
+      - name: Verify relocated standalone executables
+        shell: pwsh
+        run: |
+          $package = @(Get-ChildItem -LiteralPath dist -Filter *.zip)
+          if ($package.Count -ne 1) { throw 'Expected exactly one distribution ZIP' }
+          python scripts/check_distribution.py $package[0].FullName --result dist/package-check.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Bunsen-preview-win-x64-${{ github.sha }}
+          path: |
+            dist/*.zip
+            dist/*.sha256
+            dist/package-check.json
+          if-no-files-found: error
+          retention-days: 14

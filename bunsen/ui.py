@@ -10,6 +10,8 @@ from datetime import date
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
+from . import __version__
+
 from .core import DataError, LABELS, allocation_label, now_jst, shortages, units, validate
 from .backup import create_backup, inspect_backup, restore_backup
 from .lot_dialog import LotAllocationDialog
@@ -36,7 +38,7 @@ class App:
         self.backup_path = None
         self.backup_manifest = None
         self.write_buttons = []
-        root.title('ブンセン 補充出荷指示 — サンプル仕様')
+        root.title(f'ブンセン 補充出荷指示 {__version__} — サンプル仕様')
         root.geometry('1180x820')
         root.option_add('*Font', ('Yu Gothic UI', 12))
         style = ttk.Style()
@@ -392,7 +394,7 @@ class App:
         self.history()
         paths = write_reports(self.service.report_payload(payload['number']), self.home / 'reports')
         for path in paths:
-            webbrowser.open(path.as_uri())
+            self.open_report(path)
         self.info.set(f'{payload["number"]} 発行済み。ブラウザーの印刷からPDF保存できます。')
 
     def history(self):
@@ -412,6 +414,32 @@ class App:
         number = self.records[selection[0]][0]
         folder = self.home / ('view-output' if self.service.read_only else 'reports')
         for path in write_reports(self.service.report_payload(number), folder):
+            self.open_report(path)
+
+    @staticmethod
+    def open_report(path):
+        # Frozen Windows DLL paths must not leak into the external browser.
+        if sys.platform == 'win32' and getattr(sys, 'frozen', False):
+            import ctypes
+            from ctypes import wintypes
+            kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+            kernel.GetDllDirectoryW.argtypes = [wintypes.DWORD, wintypes.LPWSTR]
+            kernel.GetDllDirectoryW.restype = wintypes.DWORD
+            kernel.SetDllDirectoryW.argtypes = [wintypes.LPCWSTR]
+            kernel.SetDllDirectoryW.restype = wintypes.BOOL
+            buffer = ctypes.create_unicode_buffer(32768)
+            length = kernel.GetDllDirectoryW(len(buffer), buffer)
+            if length >= len(buffer):
+                raise OSError('DLL検索パスを確認できません')
+            previous = buffer.value if length else None
+            if not kernel.SetDllDirectoryW(None):
+                raise ctypes.WinError(ctypes.get_last_error())
+            try:
+                webbrowser.open(path.as_uri())
+            finally:
+                if not kernel.SetDllDirectoryW(previous):
+                    raise ctypes.WinError(ctypes.get_last_error())
+        else:
             webbrowser.open(path.as_uri())
 
     def close(self):
@@ -424,6 +452,7 @@ def main():
         if hasattr(stream, 'reconfigure'):
             stream.reconfigure(encoding='utf-8')
     parser = argparse.ArgumentParser(description='ブンセン 補充出荷指示')
+    parser.add_argument('--version', action='version', version=__version__)
     parser.add_argument('--data-dir', type=Path, help='データフォルダー（復元履歴は自動的に閲覧専用）')
     args = parser.parse_args()
     root = tk.Tk()

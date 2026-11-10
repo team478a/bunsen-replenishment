@@ -1,0 +1,26 @@
+ブンセン 補充出荷指示アプリ — 署名なし試用版
+
+1. ZIP全体を新しいフォルダーへ展開してください。
+2. BunsenReplenishment.exe を起動してください。
+3. exeだけでなく _internal・samples・docs も一緒に保管してください。
+
+Pythonやpipの追加インストールは不要です。管理者権限は要求しません。
+業務データは %LOCALAPPDATA%/BunsenReplenishment に保存します。
+この配布物には架空サンプルだけを含みます。実CSV接続・業務承認は未完了です。
+
+更新前はアプリのバックアップ機能で履歴を保存し、すべての旧画面を閉じてください。
+新しい版は別フォルダーへ展開し、上書き・フォルダー混在は避けてください。
+試用版のまま本番利用したり、署名警告を回避するため保護機能を無効にしたりしないでください。
+端末の保護機能で止まった場合は、管理担当者が配布元・ハッシュ・方針を確認してください。
+
+導入・更新・診断：docs/windows-distribution.md
+バックアップ・閲覧専用復元：docs/backup-restore.md
+
+診断例（業務DBには接続せず、架空データと一時DBを使用）：
+  BunsenTools.exe self-test --output C:\test\bunsen-result.json
+固定日付デモ：
+  BunsenTools.exe demo --output C:\test\bunsen-demo
+復旧用CLI：
+  BunsenTools.exe backup inspect C:\backup\bunsen.zip
+
+署名証明書・発行元・本番配布承認・現場PCでの受入試験は別途必要です。

@@ -32,3 +32,5 @@ python -m bunsen --data-dir "C:\recovery\restored-..."
 ```
 
 CLI復元も新規フォルダー・閲覧専用で、同じ検証を行う。バックアップには業務データが含まれるので、リポジトリへコミットせず、ブンセン側で保存先・保管期間・アクセス・別媒体コピーを管理する。実環境での障害復旧受入試験は別途必要。
+
+Windows試用ZIPではPythonコマンドの代わりに`BunsenTools.exe backup create / inspect / restore`を使える。復元履歴は`BunsenReplenishment.exe --data-dir 復元フォルダー`でも閲覧専用で開く。詳細は`windows-distribution.md`を参照。
