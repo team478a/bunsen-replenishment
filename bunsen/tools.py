@@ -30,6 +30,9 @@ def main(argv=None):
     diagnose.add_argument('--output', type=Path, required=True, help='新規JSON保存先（HTMLも同時保存）')
     mapping = sub.add_parser('mapping-template', help='実CSV項目対応表の未確認ひな形')
     mapping.add_argument('--output', type=Path, required=True)
+    kit = sub.add_parser('acceptance-kit', help='指定試験日の架空CSV・隔離起動用受入キットを新規作成')
+    kit.add_argument('--dispatch', type=date.fromisoformat, required=True)
+    kit.add_argument('--output', type=Path, required=True)
     parsed = parser.parse_args(args)
     if parsed.command == 'self-test':
         from .smoke import run_smoke
@@ -37,6 +40,15 @@ def main(argv=None):
     elif parsed.command == 'demo':
         from .demo import main as demo_main
         demo_main(parsed.output)
+    elif parsed.command == 'acceptance-kit':
+        from .acceptance import create_kit
+        from .core import DataError
+        try:
+            result = create_kit(parsed.output, parsed.dispatch)
+            print(json.dumps(dict(output=str(parsed.output.resolve()), dispatch=result['dispatch'],
+                                  trial_only=True, acceptance_status='not_performed'), ensure_ascii=True))
+        except (DataError, OSError) as exc:
+            parser.exit(1, str(exc) + '\n')
     elif parsed.command in ('diagnose', 'mapping-template'):
         from .core import DataError
         from .diagnostics import diagnose, export_report, export_template

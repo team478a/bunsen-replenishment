@@ -79,3 +79,14 @@ python -m bunsen.tools mapping-template --output C:\review\csv-mapping-review.js
 ```
 
 配布exeでは`BunsenTools.exe diagnose`と`BunsenTools.exe mapping-template`を使えます。詳細と終了コードは[取込前診断](docs/csv-diagnostics.md)を参照してください。実CSV・仕様書は引き続き未提供です。
+
+## 現場での操作試験
+
+試験日付の架空CSVと未実施の受入記録を新規生成し、通常履歴から分離した試用DBで操作できます。
+
+```powershell
+python -m bunsen.tools acceptance-kit --dispatch 2026-11-10 --output 'C:\BunsenTrial\受入キット'
+python -m bunsen --trial-kit 'C:\BunsenTrial\受入キット'
+```
+
+配布版は`BunsenTools.exe acceptance-kit`と`BunsenReplenishment.exe --trial-kit`を使います。実際の試験日に置き換え、07時以降に試してください。検証ゲートは解除せず、帳票には実出荷不可と表示します。詳細は[受入キット](docs/acceptance-kit.md)を参照してください。実CSV接続・現場受入は未完了です。

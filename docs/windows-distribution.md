@@ -1,6 +1,6 @@
 # Windows試用配布・導入・更新
 
-対象はWindows x64。現在の成果物は`0.1.0-preview.2`の署名なし試用版。実CSV接続・業務設定・本番配布の承認は未完了。Windows 10/11の現場端末での受入は別途実施する。
+対象はWindows x64。現在の成果物は`0.1.0-preview.3`の署名なし試用版。実CSV接続・業務設定・本番配布の承認は未完了。Windows 10/11の現場端末での受入は別途実施する。
 
 ## 利用端末への導入
 
@@ -58,3 +58,7 @@ PyInstaller 6.22.3とビルド依存を固定する。利用端末にはこれ�
 Python配布物のLICENSE.txt、インストールされたTkのlicense.terms、[Tcl 8.6.15のlicense.terms](https://github.com/tcltk/tcl/blob/core-8-6-15/license.terms)、ビルドツールのライセンスを同梱する。ビルド方式は[PyInstallerのspec仕様](https://pyinstaller.org/en/stable/spec-files.html)と[実行時パスの仕様](https://pyinstaller.org/en/stable/runtime-information.html)を参照。
 
 署名証明書・発行元、本番配布先、インストーラー、自動更新、端末管理との連携は未対応。現場承認後の段階で整備する。
+
+## 隔離した現場受入キット
+
+`BunsenTools.exe acceptance-kit --dispatch YYYY-MM-DD --output 新規フォルダー`で架空CSVと未実施記録を作成し、`BunsenReplenishment.exe --trial-kit キットフォルダー`で起動します。版が異なるキットは新規生成してください。通常履歴を使用せず実時計の検証を維持し、試用帳票に実出荷不可と表示します。手順は[受入キット](acceptance-kit.md)を参照してください。

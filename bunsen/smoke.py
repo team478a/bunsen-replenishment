@@ -8,6 +8,7 @@ import tkinter as tk
 
 from . import __version__
 from .backup import create_backup, restore_backup
+from .acceptance import create_kit, prepare_trial_home
 from .core import DataError, JST
 from .resources import resource_root
 from .diagnostics import diagnose, export_report, mapping_template
@@ -37,7 +38,13 @@ def run_smoke(output):
             checks.append('read_only_csv_diagnostics')
             root = tk.Tk()
             root.withdraw()
-            app = App(root, home / 'active')
+            kit = home / '架空 受入キット'
+            create_kit(kit, clock().date(), clock())
+            trial_home, _ = prepare_trial_home(kit)
+            app = App(root, trial_home)
+            assert app.service.trial_only and app.normal_home == trial_home
+            assert not (home / 'local' / 'BunsenReplenishment').exists()
+            checks.append('isolated_acceptance_kit')
             app.service.clock = clock
             root.update()
             checks.append('tkinter_startup')
@@ -62,6 +69,7 @@ def run_smoke(output):
             final = app.service.issue(app.data, app.lines, app.dispatch, '架空担当者', True, True,
                                       expected_revision=app.expected_revision, draft_number=draft['number'])
             reports = write_reports(app.service.report_payload(final['number']), app.home / 'reports')
+            assert final['trial_only'] and '架空データの試用帳票' in reports[0].read_text(encoding='utf-8')
             from . import ui
             browser = ui.webbrowser.open
             opened = []
@@ -86,7 +94,7 @@ def run_smoke(output):
             restored = restore_backup(archive, home / 'recovery', manifest['archive_sha256'], clock)
             app.restored_home = restored
             app.open_restored()
-            assert app.service.read_only
+            assert app.service.read_only and app.service.trial_only
             assert app.service.get_issue(final['number']) == final
             try:
                 app.service.issue(None, None, None, '', True, True)
@@ -95,7 +103,7 @@ def run_smoke(output):
             else:
                 raise AssertionError('Read-only gate failed')
             app.return_normal()
-            assert not app.service.read_only and app.data is None
+            assert not app.service.read_only and app.service.trial_only and app.data is None
             checks.append('return_to_normal')
         finally:
             if app is not None:

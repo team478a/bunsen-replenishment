@@ -225,11 +225,15 @@ class App:
         for button in self.write_buttons:
             button.configure(state='disabled' if self.service.read_only else 'normal')
         mode = '復元履歴・閲覧専用（実出荷用の発行は不可）' if self.service.read_only else '通常データ'
+        if self.service.trial_only:
+            mode = '架空データ試用・実出荷不可 / ' + mode
+        self.root.title(f'ブンセン 補充出荷指示 {__version__} — {mode}')
         self.storage_info.set(f'{mode}: {self.home}')
         if self.service.read_only:
             self.info.set(f'{mode}: {self.home}')
         self.open_restore_button.configure(state='normal' if self.restored_home else 'disabled')
         self.normal_button.configure(state='normal' if self.home != self.normal_home and (self.normal_home / 'history.db').is_file() else 'disabled')
+        self.normal_button.configure(text='元の試用データへ戻る（画面内容を置換）' if self.service.trial_only else '通常データへ戻る（画面内容を置換）')
 
     def backup_message(self, text):
         self.backup_result.configure(state='normal')
@@ -542,8 +546,17 @@ def main():
             stream.reconfigure(encoding='utf-8')
     parser = argparse.ArgumentParser(description='ブンセン 補充出荷指示')
     parser.add_argument('--version', action='version', version=__version__)
-    parser.add_argument('--data-dir', type=Path, help='データフォルダー（復元履歴は自動的に閲覧専用）')
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument('--data-dir', type=Path, help='データフォルダー（復元履歴は自動的に閲覧専用）')
+    source.add_argument('--trial-kit', type=Path, help='架空データの受入キット（通常履歴から隔離）')
     args = parser.parse_args()
+    trial_day = None
+    if args.trial_kit:
+        from .acceptance import prepare_trial_home
+        args.data_dir, trial_day = prepare_trial_home(args.trial_kit)
     root = tk.Tk()
-    App(root, args.data_dir)
+    app = App(root, args.data_dir)
+    if trial_day:
+        app.day.set(trial_day.isoformat())
+        app.info.set(f'架空データ受入試用。試験日 {trial_day}。実時計で検証します。GUIDE.mdの手順を実施してください。')
     root.mainloop()

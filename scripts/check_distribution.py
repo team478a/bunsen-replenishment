@@ -81,6 +81,17 @@ def check(archive_path, result_path):
         run([str(bundle / 'BunsenTools.exe'), 'demo', '--output', str(demo)])
         if len(list(demo.rglob('*.html'))) != 6:
             raise ValueError('Bundled demo reports missing')
+        kit = Path(temp) / '現場 受入キット'
+        run([str(bundle / 'BunsenTools.exe'), 'acceptance-kit', '--dispatch', '2026-11-10', '--output', str(kit)])
+        kit_info = json.loads((kit / 'kit.json').read_text(encoding='utf-8'))
+        record = json.loads((kit / 'acceptance-record.json').read_text(encoding='utf-8'))
+        if not kit_info['trial_only'] or record['overall_status'] != 'not_performed':
+            raise ValueError('Acceptance evidence incorrectly recorded')
+        if (kit / 'trial-data').exists():
+            raise ValueError('Kit generation created a database')
+        collision = run([str(bundle / 'BunsenTools.exe'), 'acceptance-kit', '--dispatch', '2026-11-10', '--output', str(kit)], check=False)
+        if collision.returncode == 0:
+            raise ValueError('Existing acceptance kit overwritten')
         info = json.loads((bundle / 'build-info.json').read_text(encoding='utf-8'))
         if info['version'] != version:
             raise ValueError('Executable and build version differ')
@@ -91,7 +102,8 @@ def check(archive_path, result_path):
             if not any(path.is_file() for path in (bundle / 'licenses/build-tools' / name).rglob('*')):
                 raise ValueError('Build-tool license missing')
         result = dict(success=True, archive=archive_path.name, sha256=expected, build=info,
-                      relocated=True, python_on_path=False, executables=checks, demo_reports=6)
+                      relocated=True, python_on_path=False, executables=checks, demo_reports=6,
+                      acceptance_kit=True)
     result_path.parent.mkdir(parents=True, exist_ok=True)
     with result_path.open('x', encoding='utf-8') as stream:
         json.dump(result, stream, ensure_ascii=False, indent=2)
