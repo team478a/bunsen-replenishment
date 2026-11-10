@@ -1,6 +1,6 @@
 """Shared strict CSV inspection. Invalid values never become a Dataset."""
 import csv
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import io
 import json
@@ -9,6 +9,7 @@ from datetime import date
 
 from .core import (DATES, KEYS, NUMBERS, POSITIVE, SCHEMA, TIMESTAMPS, WAREHOUSES,
                    Dataset, ValidationIssue, stamp)
+from .input_guard import InputGuard, unchecked
 
 ENUMS = {'ship_unit': ('PL', 'CASE'), 'rounding': ('ceil', 'floor'),
          'expiry_basis': ('shipment', 'arrival'), 'order_basis': ('included',),
@@ -23,6 +24,7 @@ class Inspection:
     issues: list
     files: list
     skipped_checks: list
+    read_consistency: dict = field(default_factory=unchecked)
 
 
 def inspect_folder(folder, now):
@@ -43,7 +45,8 @@ def inspect_folder(folder, now):
     if not folder.is_dir():
         return Inspection(None, [ValidationIssue(str(folder), None, 'FOLDER_MISSING', 'CSVフォルダーが存在しません')], [], ['CSV検証未実施'])
     try:
-        unknown = sorted(path for path in folder.iterdir() if path.suffix.lower() == '.csv' and path.name not in {name + '.csv' for name in SCHEMA})
+        guard = InputGuard(folder)
+        unknown = sorted(folder / name for name in guard.initial if name not in {name + '.csv' for name in SCHEMA})
     except OSError as exc:
         return Inspection(None, [ValidationIssue(str(folder), None, 'FOLDER_UNREADABLE', f'CSVフォルダーを読めません: {exc}')], [], ['CSV検証未実施'])
     sources = [(name, folder / (name + '.csv'), columns) for name, columns in SCHEMA.items()]
@@ -62,6 +65,7 @@ def inspect_folder(folder, now):
         reader = None
         try:
             binary = path.read_bytes()
+            guard.remember(path, binary)
             info.update(bytes=len(binary), sha256=hashlib.sha256(binary).hexdigest())
             # Match the previous read_text(newline=None) normalization for digests.
             content = binary.decode('utf-8-sig').replace('\r\n', '\n').replace('\r', '\n')
@@ -165,9 +169,20 @@ def inspect_folder(folder, now):
                 for name in ('inventory', 'policies', 'vehicles'):
                     if name in headers_ok and not any(row['warehouse'] == warehouse and row['product'] == product for _, row in records[name]):
                         issue(name, 'warehouse+product', 'ROW_MISSING', '必須行欠損', row={'warehouse': warehouse, 'product': product})
+    guard_issues, consistency = guard.finish()
+    issues.extend(guard_issues)
+    affected = set(consistency['changed_files']) | set(consistency['unverified_files'])
+    by_name = {info['filename']: info for info in files}
+    for name in sorted(affected):
+        if name in by_name:
+            by_name[name]['status'] = 'source_changed'
+        elif name in consistency['changed_files']:
+            files.append(dict(filename=name, exists=True, expected=False, optional=False,
+                              headers=None, rows=None, sha256=None, bytes=None,
+                              status='source_changed', basis_times={}))
     digest = hashlib.sha256(json.dumps(raw, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     invalid_files = {problem.filename for problem in issues}
     for info in files:
         if info['status'] == 'checked' and info['filename'] in invalid_files:
             info['status'] = 'invalid'
-    return Inspection(None if issues else Dataset(tables, raw, digest, locations), issues, files, skipped)
+    return Inspection(None if issues else Dataset(tables, raw, digest, locations), issues, files, skipped, consistency)

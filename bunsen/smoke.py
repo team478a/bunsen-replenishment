@@ -34,6 +34,9 @@ def run_smoke(output):
             diagnostic = diagnose(resource_root() / 'samples/morning', datetime(2026, 11, 9).date(), clock())
             assert diagnostic['contract_compatible'] and diagnostic['calculation_possible']
             assert diagnostic['formal_issue_allowed'] is False
+            assert diagnostic['read_consistency']['status'] == 'stable_observed'
+            assert diagnostic['read_consistency']['atomic_snapshot'] is False
+            checks.append('csv_read_stability_observation')
             export_report(diagnostic, home / 'diagnostic.json')
             assert all(field['source_field'] is None for table in mapping_template()['tables'] for field in table['fields'])
             checks.append('read_only_csv_diagnostics')

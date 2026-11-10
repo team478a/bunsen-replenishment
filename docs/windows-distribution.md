@@ -1,6 +1,6 @@
 # Windows試用配布・導入・更新
 
-対象はWindows x64。現在の成果物は`0.1.0-preview.4`の署名なし試用版。実CSV接続・業務設定・本番配布の承認は未完了。Windows 10/11の現場端末での受入は別途実施する。
+対象はWindows x64。現在の成果物は`0.1.0-preview.5`の署名なし試用版。実CSV接続・業務設定・本番配布の承認は未完了。Windows 10/11の現場端末での受入は別途実施する。
 
 ## 利用端末への導入
 
@@ -66,3 +66,7 @@ Python配布物のLICENSE.txt、インストールされたTkのlicense.terms、
 ## 補充前の14日参考見通し
 
 GUIの専用タブまたは`BunsenTools.exe outlook CSVフォルダー --start YYYY-MM-DD --output 新規JSON`から利用できます。予測欠損の影響日以降は確認不能とし、仮/正式指示を反映しません。詳細は[14日参考見通し](reference-outlook.md)を参照してください。
+
+## CSV読取中の変更検査
+
+通常取込・診断・参考CLIは共有の変更検出を通します。配布自己診断でstable_observed/atomic_snapshot=falseを確認します。取込中の変更・再照合不能時は停止し、更新完了後の再取込が必要です。同一バッチや常時監視を保証しません。[検査仕様](csv-read-guard.md)を参照してください。

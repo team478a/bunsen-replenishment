@@ -14,7 +14,7 @@ from . import __version__
 
 from .core import DataError, LABELS, allocation_label, now_jst, shortages, units, validate
 from .backup import create_backup, inspect_backup, restore_backup
-from .diagnostics import PHASE_LABELS, STATUS_LABELS, diagnose, export_report, export_template
+from .diagnostics import PHASE_LABELS, STATUS_LABELS, READ_LABELS, diagnose, export_report, export_template
 from .lot_dialog import LotAllocationDialog
 from .planning import comparison_text
 from .outlook import STATUS as OUTLOOK_STATUS, build_outlook, export_outlook
@@ -271,6 +271,7 @@ class App:
         status = '不備あり' if report['issues'] else '仮契約の入力不備は検出されませんでした'
         self.diagnostic_summary.set(f'{status}: {len(report["issues"])}件。正式発行可の判定ではありません。実CSV対応・業務承認は未確認です。')
         details = [f'対象出荷日: {report["dispatch"]}／診断日時: {report["checked_at"]}',
+                   f'読取中変更検査: {READ_LABELS[report["read_consistency"]["status"]]}。原子的取得ではありません。',
                    f'仮契約適合: {"適合" if report["contract_compatible"] else "不適合"}／計算条件: {"確認可" if report["calculation_possible"] else "不備あり・未実施"}',
                    *report['skipped_checks'], *report['limitations']]
         details.extend(f'{info["filename"]}: {STATUS_LABELS[info["status"]]}／列={info["headers"]}／原本SHA-256={info["sha256"] or "未取得"}' for info in report['files'])
