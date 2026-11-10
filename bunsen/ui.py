@@ -17,6 +17,7 @@ from .backup import create_backup, inspect_backup, restore_backup
 from .diagnostics import PHASE_LABELS, STATUS_LABELS, diagnose, export_report, export_template
 from .lot_dialog import LotAllocationDialog
 from .planning import comparison_text
+from .outlook import STATUS as OUTLOOK_STATUS, build_outlook, export_outlook
 from .service import Service, write_reports
 
 
@@ -157,6 +158,35 @@ class App:
         issue_frame.rowconfigure(0, weight=1)
         self.diagnostic_details = tk.Text(diagnostics, height=6, wrap='word', state='disabled')
         self.diagnostic_details.pack(fill='x', pady=6)
+        self.outlook_tab = ttk.Frame(tabs, padding=12)
+        tabs.add(self.outlook_tab, text='14日参考見通し')
+        self.outlook_report = None
+        self.outlook_info = tk.StringVar(value='日常操作で取り込んだデータと対象出荷日を基に表示します。仮／正式指示や手修正は反映しません。')
+        ttk.Label(self.outlook_tab, textvariable=self.outlook_info, wraplength=1080).pack(anchor='w', pady=8)
+        outlook_bar = ttk.Frame(self.outlook_tab)
+        outlook_bar.pack(fill='x', pady=6)
+        ttk.Button(outlook_bar, text='取込済データから参考見通しを表示', command=lambda: self.run(self.show_outlook)).pack(side='left', padx=5)
+        self.outlook_save = ttk.Button(outlook_bar, text='JSON・印刷HTMLを新規保存', command=lambda: self.run(self.save_outlook), state='disabled')
+        self.outlook_save.pack(side='left', padx=5)
+        ttk.Label(self.outlook_tab, text='予測に基づく参考値・出荷指示ではありません。欠損の影響日以降は確認不能。日内入庫順・未来の予測精度は未確認です。', wraplength=1080, foreground='#a54000').pack(anchor='w', pady=6)
+        outlook_frame = ttk.Frame(self.outlook_tab)
+        outlook_frame.pack(fill='both', expand=True)
+        outlook_columns = ('warehouse', 'product', 'date', 'period', 'opening', 'transit', 'forecast', 'closing', 'status')
+        self.outlook_tree = ttk.Treeview(outlook_frame, columns=outlook_columns, show='headings', height=10, selectmode='browse')
+        for col, label, width in zip(outlook_columns, ('倉庫', '商品', '日付', '期間', '始業予測P', '輸送中到着P', '需要予測P', '終業予測P', '状態'), (130, 80, 120, 100, 100, 110, 100, 100, 160)):
+            self.outlook_tree.heading(col, text=label)
+            self.outlook_tree.column(col, width=width)
+        self.outlook_tree.tag_configure('unknown', foreground='#995000')
+        self.outlook_tree.tag_configure('shortage_risk', foreground='#aa1800')
+        self.outlook_tree.bind('<<TreeviewSelect>>', self.select_outlook)
+        oy = ttk.Scrollbar(outlook_frame, orient='vertical', command=self.outlook_tree.yview)
+        ox = ttk.Scrollbar(outlook_frame, orient='horizontal', command=self.outlook_tree.xview)
+        self.outlook_tree.configure(yscrollcommand=oy.set, xscrollcommand=ox.set)
+        self.outlook_tree.grid(row=0, column=0, sticky='nsew')
+        oy.grid(row=0, column=1, sticky='ns'); ox.grid(row=1, column=0, sticky='ew')
+        outlook_frame.columnconfigure(0, weight=1); outlook_frame.rowconfigure(0, weight=1)
+        self.outlook_details = tk.Text(self.outlook_tab, height=7, wrap='word', state='disabled')
+        self.outlook_details.pack(fill='x', pady=6)
         self.diagnostic_folder.trace_add('write', lambda *_: self.invalidate_diagnostic())
         self.diagnostic_day.trace_add('write', lambda *_: self.invalidate_diagnostic())
         self.day.trace_add('write', lambda *_: self.invalidate())
@@ -171,6 +201,47 @@ class App:
         button = ttk.Button(parent, **options)
         self.write_buttons.append(button)
         return button
+
+    def invalidate_outlook(self):
+        self.outlook_report = None
+        self.outlook_save.configure(state='disabled')
+        self.outlook_tree.delete(*self.outlook_tree.get_children())
+        self.outlook_info.set('データまたは条件が変更されました。参考見通しを再表示してください。')
+        self.outlook_details.configure(state='normal')
+        self.outlook_details.delete('1.0', 'end')
+        self.outlook_details.configure(state='disabled')
+
+    def show_outlook(self):
+        self.invalidate_outlook()
+        if self.data is None:
+            raise DataError(['日常操作でデータを取り込んでください'])
+        report = build_outlook(self.data, date.fromisoformat(self.day.get()), self.service.clock())
+        self.outlook_report = report
+        for index, row in enumerate(report['rows']):
+            number = lambda key: '確認不能' if row[key] is None else row[key]
+            values = (LABELS[row['warehouse']], row['product'], row['date'], row['period'],
+                      number('opening_p'), number('transit_p'), number('forecast_p'), number('projected_closing_p'), OUTLOOK_STATUS[row['status']])
+            self.outlook_tree.insert('', 'end', iid=str(index), values=values, tags=(row['status'],))
+        self.outlook_info.set(f'{report["start"]}〜{report["end"]} / データ識別 {report["dataset_digest"][:16]} / 不備{len(report["issues"])}件。補充前・予測参考値です。')
+        self.outlook_save.configure(state='normal')
+
+    def select_outlook(self, _event=None):
+        if self.outlook_report is None or not self.outlook_tree.selection():
+            return
+        row = self.outlook_report['rows'][int(self.outlook_tree.selection()[0])]
+        basis = next(r for r in self.outlook_report['bases'] if (r['warehouse'], r['product']) == (row['warehouse'], row['product']))
+        self.outlook_details.configure(state='normal')
+        self.outlook_details.delete('1.0', 'end')
+        self.outlook_details.insert('1.0', f'{row["reason"] or "入力不備の検出なし。確定在庫ではありません。"}\n' + json.dumps(dict(row=row, basis=basis), ensure_ascii=False, indent=2))
+        self.outlook_details.configure(state='disabled')
+
+    def save_outlook(self):
+        if self.outlook_report is None:
+            raise DataError(['参考見通しの再表示が必要です'])
+        path = filedialog.asksaveasfilename(title='参考見通しを新規保存', initialfile='reference-outlook.json', defaultextension='.json', filetypes=[('参考見通しJSON', '*.json')], confirmoverwrite=False)
+        if path:
+            paths = export_outlook(self.outlook_report, path, self.folder)
+            self.open_report(paths[1])
 
     def invalidate_diagnostic(self):
         self.diagnostic_report = None
@@ -339,6 +410,7 @@ class App:
         self.detail.configure(state='disabled')
 
     def invalidate(self, keep_draft=False):
+        self.invalidate_outlook()
         if keep_draft and self.draft_number and self.lines is not None:
             self.draft_working = copy.deepcopy(self.lines)
         if not keep_draft:

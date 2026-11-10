@@ -1,6 +1,6 @@
 # Windows試用配布・導入・更新
 
-対象はWindows x64。現在の成果物は`0.1.0-preview.3`の署名なし試用版。実CSV接続・業務設定・本番配布の承認は未完了。Windows 10/11の現場端末での受入は別途実施する。
+対象はWindows x64。現在の成果物は`0.1.0-preview.4`の署名なし試用版。実CSV接続・業務設定・本番配布の承認は未完了。Windows 10/11の現場端末での受入は別途実施する。
 
 ## 利用端末への導入
 
@@ -62,3 +62,7 @@ Python配布物のLICENSE.txt、インストールされたTkのlicense.terms、
 ## 隔離した現場受入キット
 
 `BunsenTools.exe acceptance-kit --dispatch YYYY-MM-DD --output 新規フォルダー`で架空CSVと未実施記録を作成し、`BunsenReplenishment.exe --trial-kit キットフォルダー`で起動します。版が異なるキットは新規生成してください。通常履歴を使用せず実時計の検証を維持し、試用帳票に実出荷不可と表示します。手順は[受入キット](acceptance-kit.md)を参照してください。
+
+## 補充前の14日参考見通し
+
+GUIの専用タブまたは`BunsenTools.exe outlook CSVフォルダー --start YYYY-MM-DD --output 新規JSON`から利用できます。予測欠損の影響日以降は確認不能とし、仮/正式指示を反映しません。詳細は[14日参考見通し](reference-outlook.md)を参照してください。

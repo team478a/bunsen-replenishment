@@ -90,3 +90,9 @@ python -m bunsen --trial-kit 'C:\BunsenTrial\受入キット'
 ```
 
 配布版は`BunsenTools.exe acceptance-kit`と`BunsenReplenishment.exe --trial-kit`を使います。実際の試験日に置き換え、07時以降に試してください。検証ゲートは解除せず、帳票には実出荷不可と表示します。詳細は[受入キット](docs/acceptance-kit.md)を参照してください。実CSV接続・現場受入は未完了です。
+
+## 4〜14日先の不足リスク参考表示
+
+「14日参考見通し」では取込済みの倉庫在庫・輸送中と需要予測から、基準日〜14日先の補充前の参考残高を表示できます。予測欠損の影響日以降は確認不能です。仮／正式指示・手修正・乾麺在庫の割当は反映せず、出荷指示と区別します。
+
+CLIは`python -m bunsen.tools outlook CSVフォルダー --start YYYY-MM-DD --output 新規JSON`（配布版は`BunsenTools.exe outlook`）。根拠・欠損・出力・制約は[14日参考見通し](docs/reference-outlook.md)を参照してください。未来の予測精度を保証する機能ではありません。

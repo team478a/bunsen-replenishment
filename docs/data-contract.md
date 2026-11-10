@@ -48,3 +48,7 @@ CSV列・DBテーブルは維持する。再開した仮指示から発行する
 CSV列・数量・換算は変更しない。同梱架空CSVのみ、DATE/TIMESTAMP項目を指定試験日への同一日数差で移す。実CSVはこの変換の入力にできない。kit.jsonに版・元日付・移動日数・元/生成ハッシュを記録する。
 
 試用DBはtrial-info.jsonで識別し、trial_modeイベントと発行payloadのtrial_only=trueを保存する。既存の業務DBスキーマは変更しない。受入記録は全件not_performed、承認unconfirmedで生成し、自動検証結果とは区別する。
+
+## 第9段階の参考見通し
+
+CSV契約は変更しない。bunsen-reference-outlook/version=1のJSONは派生参考出力で、取込・発行データとして受け付けない。基準日・作成日時・元データ識別・在庫/輸送中/予測基準・日別P残高・確認不能理由を保存する。未取得の数値はnullで、明示0と区別する。formal_issue_allowedとplanned_replenishment_includedは常にfalse。日別の既知の予測・輸送中明細は残高が確認不能でも個別に表示する。

@@ -14,6 +14,7 @@ from .resources import resource_root
 from .diagnostics import diagnose, export_report, mapping_template
 from .service import write_reports
 from .ui import App
+from .outlook import export_outlook
 from datetime import datetime
 
 
@@ -51,6 +52,13 @@ def run_smoke(output):
             app.data = app.service.import_folder(resource_root() / 'samples/before_morning')
             app.day.set('2026-11-09')
             app.compute()
+            working = app.lines
+            app.show_outlook()
+            assert app.lines is working and len(app.outlook_report['rows']) == 30
+            assert app.outlook_report['formal_issue_allowed'] is False
+            assert any(r['projected_closing_p'] is None for r in app.outlook_report['rows'])
+            export_outlook(app.outlook_report, home / 'outlook.json')
+            checks.append('read_only_reference_outlook')
             draft = app.service.issue(app.data, app.lines, app.dispatch, '', False)
             try:
                 app.service.issue(app.data, app.lines, app.dispatch, '架空担当者', True, True)
