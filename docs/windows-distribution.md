@@ -1,6 +1,6 @@
 # Windows試用配布・導入・更新
 
-対象はWindows x64。初期成果物は`0.1.0-preview.1`の署名なし試用版。実CSV接続・業務設定・本番配布の承認は未完了。Windows 10/11の現場端末での受入は別途実施する。
+対象はWindows x64。現在の成果物は`0.1.0-preview.2`の署名なし試用版。実CSV接続・業務設定・本番配布の承認は未完了。Windows 10/11の現場端末での受入は別途実施する。
 
 ## 利用端末への導入
 
@@ -29,6 +29,8 @@
 .\BunsenTools.exe backup create C:\data\BunsenReplenishment D:\backup\new.zip
 .\BunsenTools.exe backup inspect D:\backup\new.zip
 .\BunsenTools.exe backup restore D:\backup\new.zip C:\recovery
+.\BunsenTools.exe diagnose C:\input\csv --dispatch 2026-11-10 --output C:\review\diagnostic.json
+.\BunsenTools.exe mapping-template --output C:\review\csv-mapping-review.json
 .\BunsenReplenishment.exe --data-dir C:\recovery\restored-...
 ```
 

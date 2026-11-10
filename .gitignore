@@ -13,3 +13,5 @@ build/
 *.zip
 restored-*/
 view-output/
+diagnostic-output/
+csv-mapping-review.json

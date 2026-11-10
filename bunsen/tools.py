@@ -1,5 +1,6 @@
 """Console entry point shared by source and Windows distribution."""
 import argparse
+from datetime import date
 import json
 from pathlib import Path
 import sys
@@ -23,6 +24,12 @@ def main(argv=None):
     test.add_argument('--output', type=Path, required=True)
     demo = sub.add_parser('demo', help='固定日付の架空データデモ')
     demo.add_argument('--output', type=Path, required=True)
+    diagnose = sub.add_parser('diagnose', help='仮CSV契約に対する読取専用の取込前診断')
+    diagnose.add_argument('folder', type=Path)
+    diagnose.add_argument('--dispatch', type=date.fromisoformat, required=True)
+    diagnose.add_argument('--output', type=Path, required=True, help='新規JSON保存先（HTMLも同時保存）')
+    mapping = sub.add_parser('mapping-template', help='実CSV項目対応表の未確認ひな形')
+    mapping.add_argument('--output', type=Path, required=True)
     parsed = parser.parse_args(args)
     if parsed.command == 'self-test':
         from .smoke import run_smoke
@@ -30,6 +37,22 @@ def main(argv=None):
     elif parsed.command == 'demo':
         from .demo import main as demo_main
         demo_main(parsed.output)
+    elif parsed.command in ('diagnose', 'mapping-template'):
+        from .core import DataError
+        from .diagnostics import diagnose, export_report, export_template
+        try:
+            if parsed.command == 'mapping-template':
+                path = export_template(parsed.output)
+                print(json.dumps(dict(path=str(path), status='unconfirmed'), ensure_ascii=True))
+            else:
+                report = diagnose(parsed.folder, parsed.dispatch)
+                paths = export_report(report, parsed.output)
+                print(json.dumps(dict(status=report['status'], issues=len(report['issues']),
+                                      formal_issue_allowed=False, outputs=[str(path) for path in paths]), ensure_ascii=True))
+                if report['issues']:
+                    raise SystemExit(2)
+        except (DataError, OSError) as exc:
+            parser.exit(1, str(exc) + '\n')
 
 
 if __name__ == '__main__':
