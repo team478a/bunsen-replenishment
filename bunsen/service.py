@@ -20,6 +20,16 @@ class Service:
     def __init__(self, db_path, clock=now_jst):
         self.clock = clock
         self.db_path = Path(db_path).resolve()
+        self.trial_only = False
+        trial_marker = self.db_path.parent / 'trial-info.json'
+        if trial_marker.exists():
+            try:
+                info = json.loads(trial_marker.read_text(encoding='utf-8'))
+                if info != {'format': 'bunsen-trial-home', 'version': 1, 'trial_only': True}:
+                    raise ValueError('試用識別が不正')
+            except (OSError, ValueError) as exc:
+                raise DataError(['試用DB識別を確認できません']) from exc
+            self.trial_only = True
         self.read_only = (self.db_path.parent / 'restore-info.json').exists()
         if self.read_only:
             from .backup import validate_database
@@ -27,6 +37,7 @@ class Service:
             try:
                 self.db.execute('PRAGMA query_only=ON')
                 validate_database(self.db)
+                self.trial_only = self.trial_only or self.db.execute("SELECT 1 FROM events WHERE kind='trial_mode' LIMIT 1").fetchone() is not None
             except Exception:
                 self.db.close()
                 raise
@@ -39,6 +50,10 @@ class Service:
             formal INTEGER NOT NULL, number TEXT NOT NULL UNIQUE, at TEXT NOT NULL,
             payload TEXT NOT NULL, UNIQUE(dispatch, formal, revision))''')
         self.db.commit()
+        recorded_trial = self.db.execute("SELECT 1 FROM events WHERE kind='trial_mode' LIMIT 1").fetchone() is not None
+        if self.trial_only and not recorded_trial:
+            self.event('trial_mode', {'trial_only': True})
+        self.trial_only = self.trial_only or recorded_trial
 
     def close(self):
         self.db.close()
@@ -138,6 +153,8 @@ class Service:
                    'validation': errors, 'dispatch': dispatch.isoformat(), 'at': at}
         if reference:
             payload['source_draft'] = reference
+        if self.trial_only:
+            payload['trial_only'] = True
         try:
             self.db.execute('BEGIN IMMEDIATE')
             if source and self.latest_revision(dispatch, False) != source['revision']:
@@ -184,6 +201,8 @@ class Service:
                                     'checked_at': self.clock().isoformat()}
         if self.read_only:
             payload['restored_view'] = True
+        if self.trial_only:
+            payload['trial_only'] = True
         return payload
 
 
@@ -242,6 +261,7 @@ def report_html(payload, warehouse):
     return f'''<!doctype html><html lang="ja"><meta charset="utf-8"><title>{esc(title)} {esc(payload['number'])}</title>
 <style>body{{font-family:Meiryo,sans-serif;font-size:14px;margin:24px}}h1{{color:{'#174d37' if formal else '#9b5200'}}}table{{border-collapse:collapse;width:100%}}td,th{{border:1px solid #777;padding:7px}}.basis{{font-size:12px;background:#f3f3f3}}@media print{{button{{display:none}}body{{margin:0}}}}</style>
 <h1>{esc(title)} — {esc(LABELS[warehouse])}</h1><p>{esc(status)}</p>
+{'<p style="border:4px solid #9b2600;padding:12px;font-size:24px;font-weight:bold">架空データの試用帳票 — 実出荷に使用しない。現場受入・業務承認の完了を示しません。</p>' if payload.get('trial_only') else ''}
 {'<p style="border:4px solid #9b2600;padding:12px;font-size:22px;font-weight:bold">復元履歴の参考帳票 — 実出荷に使用しない。改訂照合は復元時点の履歴内のみです。</p>' if payload.get('restored_view') else ''}
 <p style="border:3px solid {status_color};padding:12px;font-size:18px;font-weight:bold">{esc(revision_notice)}</p>
 <p>発行番号 {esc(payload['number'])}／改訂 {payload['revision']}／担当者 {esc(payload['operator'] or '未確認')}<br>
