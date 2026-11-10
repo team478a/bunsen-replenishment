@@ -33,6 +33,10 @@ def main(argv=None):
     kit = sub.add_parser('acceptance-kit', help='指定試験日の架空CSV・隔離起動用受入キットを新規作成')
     kit.add_argument('--dispatch', type=date.fromisoformat, required=True)
     kit.add_argument('--output', type=Path, required=True)
+    outlook = sub.add_parser('outlook', help='補充前の14日参考見通し（出荷指示ではありません）')
+    outlook.add_argument('folder', type=Path)
+    outlook.add_argument('--start', type=date.fromisoformat, required=True)
+    outlook.add_argument('--output', type=Path, required=True)
     parsed = parser.parse_args(args)
     if parsed.command == 'self-test':
         from .smoke import run_smoke
@@ -47,6 +51,18 @@ def main(argv=None):
             result = create_kit(parsed.output, parsed.dispatch)
             print(json.dumps(dict(output=str(parsed.output.resolve()), dispatch=result['dispatch'],
                                   trial_only=True, acceptance_status='not_performed'), ensure_ascii=True))
+        except (DataError, OSError) as exc:
+            parser.exit(1, str(exc) + '\n')
+    elif parsed.command == 'outlook':
+        from .core import DataError, load
+        from .outlook import build_outlook, export_outlook
+        try:
+            report = build_outlook(load(parsed.folder), parsed.start)
+            paths = export_outlook(report, parsed.output, parsed.folder)
+            print(json.dumps(dict(status=report['status'], issues=len(report['issues']), formal_issue_allowed=False,
+                                  outputs=[str(p) for p in paths]), ensure_ascii=True))
+            if report['issues']:
+                raise SystemExit(2)
         except (DataError, OSError) as exc:
             parser.exit(1, str(exc) + '\n')
     elif parsed.command in ('diagnose', 'mapping-template'):

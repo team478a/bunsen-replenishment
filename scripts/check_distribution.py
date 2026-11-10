@@ -81,6 +81,13 @@ def check(archive_path, result_path):
         run([str(bundle / 'BunsenTools.exe'), 'demo', '--output', str(demo)])
         if len(list(demo.rglob('*.html'))) != 6:
             raise ValueError('Bundled demo reports missing')
+        outlook = Path(temp) / '参考見通し.json'
+        reference = run([str(bundle / 'BunsenTools.exe'), 'outlook', str(bundle / 'samples/morning'), '--start', '2026-11-09', '--output', str(outlook)], check=False)
+        if reference.returncode != 2:
+            raise ValueError('Partial reference outlook did not return code 2: ' + reference.stderr)
+        reference_data = json.loads(outlook.read_text(encoding='utf-8'))
+        if reference_data['formal_issue_allowed'] or len(reference_data['rows']) != 30 or not outlook.with_suffix('.html').is_file():
+            raise ValueError('Reference outlook is not explicitly non-issuable')
         kit = Path(temp) / '現場 受入キット'
         run([str(bundle / 'BunsenTools.exe'), 'acceptance-kit', '--dispatch', '2026-11-10', '--output', str(kit)])
         kit_info = json.loads((kit / 'kit.json').read_text(encoding='utf-8'))
@@ -103,7 +110,7 @@ def check(archive_path, result_path):
                 raise ValueError('Build-tool license missing')
         result = dict(success=True, archive=archive_path.name, sha256=expected, build=info,
                       relocated=True, python_on_path=False, executables=checks, demo_reports=6,
-                      acceptance_kit=True)
+                      acceptance_kit=True, reference_outlook=True)
     result_path.parent.mkdir(parents=True, exist_ok=True)
     with result_path.open('x', encoding='utf-8') as stream:
         json.dump(result, stream, ensure_ascii=False, indent=2)

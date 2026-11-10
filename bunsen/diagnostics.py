@@ -122,9 +122,9 @@ def _write_outputs(outputs, protected_folder=None):
         raise DataError(['出力先が重複しています'])
     for path in paths:
         if path.exists():
-            raise DataError(['診断出力は上書きしません。別名を指定してください'])
+            raise DataError(['出力は上書きしません。別名を指定してください'])
         if protected_folder is not None and path.is_relative_to(Path(protected_folder).resolve()):
-            raise DataError(['入力フォルダー内には診断結果を保存できません'])
+            raise DataError(['入力フォルダー内には結果を保存できません'])
     created = []
     try:
         for path, (_, content) in zip(paths, outputs):
