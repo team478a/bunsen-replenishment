@@ -81,6 +81,13 @@ def check(archive_path, result_path):
         run([str(bundle / 'BunsenTools.exe'), 'demo', '--output', str(demo)])
         if len(list(demo.rglob('*.html'))) != 6:
             raise ValueError('Bundled demo reports missing')
+        diagnosis = Path(temp) / 'CSV読取検査.json'
+        diagnosed = run([str(bundle / 'BunsenTools.exe'), 'diagnose', str(bundle / 'samples/morning'), '--dispatch', '2026-11-09', '--output', str(diagnosis)], check=False)
+        if diagnosed.returncode not in (0, 2):
+            raise ValueError('Bundled CSV diagnosis failed: ' + diagnosed.stderr)
+        reading = json.loads(diagnosis.read_text(encoding='utf-8'))['read_consistency']
+        if reading['status'] != 'stable_observed' or reading['atomic_snapshot'] is not False:
+            raise ValueError('CSV read observation metadata missing or overstated')
         outlook = Path(temp) / '参考見通し.json'
         reference = run([str(bundle / 'BunsenTools.exe'), 'outlook', str(bundle / 'samples/morning'), '--start', '2026-11-09', '--output', str(outlook)], check=False)
         if reference.returncode != 2:
@@ -110,7 +117,7 @@ def check(archive_path, result_path):
                 raise ValueError('Build-tool license missing')
         result = dict(success=True, archive=archive_path.name, sha256=expected, build=info,
                       relocated=True, python_on_path=False, executables=checks, demo_reports=6,
-                      acceptance_kit=True, reference_outlook=True)
+                      acceptance_kit=True, reference_outlook=True, csv_read_observation=True)
     result_path.parent.mkdir(parents=True, exist_ok=True)
     with result_path.open('x', encoding='utf-8') as stream:
         json.dump(result, stream, ensure_ascii=False, indent=2)

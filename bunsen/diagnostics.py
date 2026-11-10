@@ -11,13 +11,17 @@ from .ingest import ENUMS
 
 PHASE_LABELS = {'contract': '入力契約', 'calculation': '計算条件', 'morning_stock': '朝現物在庫'}
 STATUS_LABELS = {'missing': '未取得', 'checked': '読取・構造チェック済み', 'invalid': '不備あり',
-                 'unsupported': '未対応', 'header_error': '列不一致', 'encoding_error': '文字コード確認不能', 'read_error': '読取エラー'}
+                 'unsupported': '未対応', 'header_error': '列不一致', 'encoding_error': '文字コード確認不能', 'read_error': '読取エラー',
+                 'source_changed': '読取中変更／照合不能'}
+READ_LABELS = {'not_checked': '未実施', 'stable_observed': '前後の観測で変更検出なし（同一バッチ保証ではありません）',
+               'changed': '変更検出・取込停止', 'unverifiable': '照合不能・取込停止'}
 
 LIMITATIONS = [
     '既存の実CSV仕様・項目対応・業務設定の承認は未確認です。診断対象は仮データ契約v0です。',
     '入力CSV・業務DB・取込済みデータは変更していません。診断はデータ取込ではありません。',
     '実ロット選択後の数量・期限・積載の出荷検証は未実施です。正式発行前に必ず再検証します。',
     'CSVの確認済み申告だけで現物確認の真正性・全ロットの網羅性を証明することはできません。',
+    '前後のCSV照合は原子的取得や同一業務バッチの証明ではありません。取込前の世代混在・観測間の完全復元は検出できない場合があります。',
 ]
 
 
@@ -48,6 +52,7 @@ def diagnose(folder, dispatch, now=None):
                 dispatch=dispatch.isoformat(), input_fingerprint=fingerprint,
                 dataset_digest=inspection.dataset.digest if inspection.dataset else None,
                 actual_mapping_status='unconfirmed', formal_issue_allowed=False,
+                read_consistency=inspection.read_consistency,
                 contract_compatible=inspection.dataset is not None,
                 calculation_checked=calculation_checked, calculation_possible=calculation_possible,
                 morning_stock_checked=morning_checked,
@@ -105,12 +110,14 @@ def report_html(report):
                   json.dumps(info['basis_times'], ensure_ascii=False)]
         inventory.append('<tr>' + ''.join(f'<td>{esc(value)}</td>' for value in values) + '</tr>')
     warnings = [f'{row["warehouse"]} {row["product"]}: {row["message"]}' for row in report['warnings']]
+    read_check = report.get('read_consistency', {'status': 'not_checked', 'atomic_snapshot': False})
     return f'''<!doctype html><html lang="ja"><meta charset="utf-8"><title>取込前診断レポート</title>
 <style>body{{font-family:Meiryo,sans-serif;font-size:14px;margin:24px}}table{{border-collapse:collapse;width:100%;font-size:12px}}td,th{{border:1px solid #777;padding:6px;overflow-wrap:anywhere}}.notice{{border:3px solid #a54000;padding:12px;font-weight:bold}}@media print{{button{{display:none}}thead{{display:table-header-group}}}}</style>
 <h1>取込前診断レポート — {esc(state)}</h1><p class="notice">診断結果は正式出荷指示ではありません。正式発行可の判定や過去の確認の再利用には使用できません。実CSV接続・業務承認は未確認です。</p>
 <p>診断日時 {esc(report['checked_at'])}／対象出荷日 {esc(report['dispatch'])}<br>対象 {esc(report['input_folder'])}<br>入力識別 {esc(report['input_fingerprint'])}</p>
 <button onclick="window.print()">印刷・PDFに保存</button><h2>実施状況</h2><ul>{''.join('<li>'+esc(label)+': '+('はい' if value else 'いいえ')+'</li>' for label,value in checks)}</ul>
 <h2>未実施・制約</h2><ul>{''.join('<li>'+esc(value)+'</li>' for value in report['skipped_checks'] + report['limitations'])}</ul>
+<h2>読取中のCSV変更検査</h2><p>{esc(READ_LABELS[read_check['status']])}。原子的な一括取得ではありません。</p><pre>{esc(json.dumps(read_check, ensure_ascii=False, indent=2))}</pre>
 <h2>不備一覧（{len(rows)}件）</h2><table><thead><tr>{''.join('<th>'+label+'</th>' for label in ['区分','ファイル','行','商品','倉庫','対象日／基準日時','ロット','項目','記録値','コード','理由'])}</tr></thead><tbody>{''.join(rows)}</tbody></table>
 <h2>ファイル・列・基準日時の観察結果</h2><p>行数は読取できた行数です。エラー時は全件を読めたことを意味しません。基準日時はCSV記載値で、業務上の承認を示しません。</p><table><thead><tr>{''.join('<th>'+label+'</th>' for label in ['ファイル','状態','読取行数','観察した列名','原本SHA-256','記載された基準日時'])}</tr></thead><tbody>{''.join(inventory)}</tbody></table>
 <h2>予測に基づく参考警告</h2><p>{'<br>'.join(esc(value) for value in warnings) or '検出なし／入力不備時は未実施'}</p></html>'''

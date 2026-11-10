@@ -52,3 +52,7 @@ CSV列・数量・換算は変更しない。同梱架空CSVのみ、DATE/TIMEST
 ## 第9段階の参考見通し
 
 CSV契約は変更しない。bunsen-reference-outlook/version=1のJSONは派生参考出力で、取込・発行データとして受け付けない。基準日・作成日時・元データ識別・在庫/輸送中/予測基準・日別P残高・確認不能理由を保存する。未取得の数値はnullで、明示0と区別する。formal_issue_allowedとplanned_replenishment_includedは常にfalse。日別の既知の予測・輸送中明細は残高が確認不能でも個別に表示する。
+
+## 第10段階の読取中変更検査
+
+診断JSON version=1へread_consistencyを追加する。method、status、atomic_snapshot=false、changed_files、unverified_filesを保持する。INPUT_CHANGED/INPUT_RECHECK_FAILEDは入力契約区分の不備。CSV列と既存取込ハッシュ・DB形式は維持する。以前の診断JSONに追加項目がない場合、HTML再生成では未実施として扱う。形式と検出限界は`csv-read-guard.md`参照。
