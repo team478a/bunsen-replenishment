@@ -10,6 +10,7 @@ from . import __version__
 from .backup import create_backup, restore_backup
 from .core import DataError, JST
 from .resources import resource_root
+from .diagnostics import diagnose, export_report, mapping_template
 from .service import write_reports
 from .ui import App
 from datetime import datetime
@@ -28,6 +29,12 @@ def run_smoke(output):
         app = None
         try:
             clock = lambda: datetime(2026, 11, 9, 9, tzinfo=JST)
+            diagnostic = diagnose(resource_root() / 'samples/morning', datetime(2026, 11, 9).date(), clock())
+            assert diagnostic['contract_compatible'] and diagnostic['calculation_possible']
+            assert diagnostic['formal_issue_allowed'] is False
+            export_report(diagnostic, home / 'diagnostic.json')
+            assert all(field['source_field'] is None for table in mapping_template()['tables'] for field in table['fields'])
+            checks.append('read_only_csv_diagnostics')
             root = tk.Tk()
             root.withdraw()
             app = App(root, home / 'active')

@@ -66,3 +66,16 @@ ZIPを選択・検証し、復元先の親フォルダーを指定すると、�
 **復元履歴は閲覧専用です。新規発行はできません。** 再出力には「参考帳票・実出荷に使用しない」と表示し、view-outputへ保存します。復元した元の帳票ファイルも歴史資料であり実出荷には使用しないでください。本番復帰は、バックアップ後の出荷・改訂との照合が必要です。
 
 GUIを起動できない場合のCLI、形式・上限・復旧上の制約は[バックアップと復元](docs/backup-restore.md)を参照してください。
+
+## 実CSV接続前の診断・項目対応
+
+「取込前診断・項目対応」でCSVフォルダーと対象出荷日を指定すると、商品・倉庫・日付・項目別に不備を一覧表示し、JSONと印刷用HTMLへ新規保存できます。元CSV・業務DB・現在の取込内容は変更しません。
+
+診断対象は仮契約v0です。**診断成功は実CSV接続完了や正式発行可を意味しません。** 実ロット・数量・期限・積載は通常の正式発行フローで再検証します。実CSVの列名・単位・変換・確認者は[項目対応表](docs/csv-mapping-review.md)で未確認として整理しました。
+
+```powershell
+python -m bunsen.tools diagnose C:\input\csv --dispatch 2026-11-10 --output C:\review\diagnostic.json
+python -m bunsen.tools mapping-template --output C:\review\csv-mapping-review.json
+```
+
+配布exeでは`BunsenTools.exe diagnose`と`BunsenTools.exe mapping-template`を使えます。詳細と終了コードは[取込前診断](docs/csv-diagnostics.md)を参照してください。実CSV・仕様書は引き続き未提供です。

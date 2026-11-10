@@ -1,12 +1,7 @@
 from __future__ import annotations
 
-import csv
-import hashlib
-import io
-import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
-from pathlib import Path
 
 JST = timezone(timedelta(hours=9))
 WAREHOUSES = ('KOBE', 'SUGITO')
@@ -32,9 +27,36 @@ KEYS = {'products': ('product',), 'warehouses': ('warehouse',),
         'vehicles': ('warehouse', 'product'), 'dry_stock': ('product', 'lot')}
 
 
+@dataclass(frozen=True)
+class ValidationIssue:
+    filename: str
+    field: str | None
+    code: str
+    message: str
+    line: int | None = None
+    product: str | None = None
+    warehouse: str | None = None
+    date: str | None = None
+    lot: str | None = None
+    value: str | None = None
+    phase: str = 'contract'
+
+    def __str__(self):
+        prefix = self.filename + (f':{self.line}' if self.line is not None else '')
+        if not any((self.field, self.product, self.warehouse, self.date, self.lot)):
+            return f'{prefix}: {self.message}'
+        warehouse = '乾麺倉庫' if self.warehouse == 'DRY' else self.warehouse
+        context = f'商品={self.product or "-"} 倉庫={warehouse or "-"} 日付={self.date or "-"}'
+        if self.lot:
+            context += f' ロット={self.lot}'
+        return f'{prefix} {context} 項目={self.field or "-"}: {self.message}'
+
+
 class DataError(ValueError):
     def __init__(self, errors):
-        self.errors = list(errors)
+        values = list(errors)
+        self.issues = [value for value in values if isinstance(value, ValidationIssue)]
+        self.errors = [str(value) for value in values]
         super().__init__('\n'.join(self.errors))
 
 
@@ -43,6 +65,7 @@ class Dataset:
     tables: dict
     raw: dict
     digest: str
+    locations: dict = field(default_factory=dict)
 
 
 def now_jst():
@@ -56,92 +79,16 @@ def stamp(value):
     return result.astimezone(JST)
 
 
+def inspect_folder(folder, now=None):
+    from .ingest import inspect_folder as inspect
+    return inspect(folder, now or now_jst())
+
+
 def load(folder, now=None):
-    now = now or now_jst()
-    tables, raw, errors = {}, {}, []
-    folder = Path(folder)
-    if not folder.is_dir():
-        raise DataError([f'{folder}: CSVフォルダーが存在しません'])
-    allowed = {table + '.csv' for table in SCHEMA}
-    for path in sorted(folder.iterdir()):
-        if path.suffix.lower() == '.csv' and path.name not in allowed:
-            errors.append(f'{path.name}: 未対応CSV。仮データ契約外のため取込停止')
-    for table, columns in SCHEMA.items():
-        path = Path(folder) / (table + '.csv')
-        if not path.exists():
-            if table == 'dry_stock':
-                tables[table] = []
-                continue
-            errors.append(f'{table}.csv: 必須ファイル欠損')
-            tables[table] = []
-            continue
-        try:
-            content = path.read_text(encoding='utf-8-sig')
-            raw[path.name] = content
-            reader = csv.DictReader(io.StringIO(content), strict=True)
-            if reader.fieldnames != columns.split(','):
-                raise ValueError('列名・列順が仮データ契約と一致しません')
-            rows, seen = [], set()
-            for line, row in enumerate(reader, 2):
-                context = f'{table}.csv:{line} 商品={row.get("product", "-")} 倉庫={row.get("warehouse", "乾麺")} 日付={row.get("date", row.get("checked_at", row.get("as_of", "-")))}'
-                try:
-                    if None in row or any(v is None or not v.strip() for v in row.values()):
-                        raise ValueError('項目欠損（ゼロとは区別）')
-                    row = {k: v.strip() for k, v in row.items()}
-                    for field in row:
-                        value = row[field]
-                        if field in NUMBERS:
-                            if not value.isascii() or not value.isdecimal():
-                                raise ValueError(f'{field}: 0以上の整数必須')
-                            row[field] = int(value)
-                            if field in POSITIVE and row[field] == 0:
-                                raise ValueError(f'{field}: 正整数必須')
-                        elif field in TIMESTAMPS:
-                            parsed = stamp(value)
-                            if parsed > now:
-                                raise ValueError(f'{field}: 未来の基準日時')
-                        elif field in DATES:
-                            if date.fromisoformat(value).isoformat() != value:
-                                raise ValueError(f'{field}: YYYY-MM-DD必須')
-                    if 'confirmed' in row and row['confirmed'] != 'yes':
-                        raise ValueError('confirmed: 未確認')
-                    enums = {'ship_unit': ('PL', 'CASE'), 'rounding': ('ceil', 'floor'),
-                             'expiry_basis': ('shipment', 'arrival'), 'order_basis': ('included',),
-                             'source': ('physical',)}
-                    for field, choices in enums.items():
-                        if field in row and row[field] not in choices:
-                            raise ValueError(f'{field}: 未対応または未確認 {row[field]}')
-                    key = tuple(row[k] for k in KEYS[table])
-                    if key in seen:
-                        raise ValueError(f'重複キー {key}')
-                    seen.add(key)
-                    rows.append(row)
-                except (ValueError, TypeError) as exc:
-                    errors.append(f'{context}: {exc}')
-            tables[table] = rows
-        except (ValueError, OSError, UnicodeError, csv.Error) as exc:
-            tables[table] = []
-            errors.append(f'{path.name}: {exc}')
-    products = {r['product'] for r in tables['products']}
-    if not products:
-        errors.append('products.csv: 商品なし')
-    for table, rows in tables.items():
-        for r in rows:
-            if 'product' in r and table != 'products' and r['product'] not in products:
-                errors.append(f'{table}: 未知商品 {r["product"]}')
-            if 'warehouse' in r and r['warehouse'] not in WAREHOUSES:
-                errors.append(f'{table}: 未知倉庫 {r["warehouse"]}')
-    for w in WAREHOUSES:
-        if not any(r['warehouse'] == w for r in tables['warehouses']):
-            errors.append(f'warehouses: {w} 欠損')
-        for p in products:
-            for table in ('inventory', 'policies', 'vehicles'):
-                if not any(r['warehouse'] == w and r['product'] == p for r in tables[table]):
-                    errors.append(f'{table}: 倉庫={w} 商品={p} 必須行欠損')
-    if errors:
-        raise DataError(errors)
-    digest = hashlib.sha256(json.dumps(raw, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
-    return Dataset(tables, raw, digest)
+    inspection = inspect_folder(folder, now)
+    if inspection.issues:
+        raise DataError(inspection.issues)
+    return inspection.dataset
 
 
 def case_p(product):
@@ -192,42 +139,64 @@ def calculate(data, dispatch):
     t, lines, errors = data.tables, [], []
     products = {r['product']: r for r in t['products']}
     for inv in t['inventory']:
+        issue_start = len(errors)
         w, p = inv['warehouse'], inv['product']
-        context = f'倉庫={w} 商品={p} 出荷日={dispatch}'
+        def problem(table, field, code, message, day=None, key=None, value=None):
+            record_key = key if key is not None else (w, p)
+            errors.append(ValidationIssue(table + '.csv', field, code, message,
+                                          line=data.locations.get(table, {}).get(record_key),
+                                          product=p, warehouse=w, date=str(day or dispatch),
+                                          phase='calculation', value=value))
         policy = next(r for r in t['policies'] if r['warehouse'] == w and r['product'] == p)
         lead = next(r['lead_days'] for r in t['warehouses'] if r['warehouse'] == w)
-        arrival = dispatch + timedelta(days=lead)
+        try:
+            arrival = dispatch + timedelta(days=lead)
+        except OverflowError:
+            problem('warehouses', 'lead_days', 'DATE_RANGE', '配送日数が日付の計算可能範囲を超えています', key=(w,), value=str(lead))
+            continue
         start = stamp(inv['as_of']).date()
         if start > dispatch:
-            errors.append(f'{context}: 在庫基準日が出荷日より未来')
+            problem('inventory', 'as_of', 'INVENTORY_AFTER_DISPATCH', '在庫基準日が出荷日より未来', value=inv['as_of'])
             continue
         if stamp(policy['transit_checked_at']) != stamp(inv['as_of']):
-            errors.append(f'{context}: 輸送中網羅確認日時が在庫基準日時と不一致')
+            problem('policies', 'transit_checked_at', 'TRANSIT_SNAPSHOT', '輸送中網羅確認日時が在庫基準日時と不一致', value=policy['transit_checked_at'])
         forecasts = {r['date']: r for r in t['forecast'] if r['warehouse'] == w and r['product'] == p}
         before, demand = 0, 0
-        end = arrival + timedelta(days=policy['coverage_days'])
-        day = start
-        while day < end:
-            row = forecasts.get(day.isoformat())
-            if row is None:
-                errors.append(f'{context} 予測日={day}: 需要予測欠損')
-            elif stamp(row['as_of']).date() > dispatch:
-                errors.append(f'{context} 予測日={day}: 予測基準日が出荷日より未来')
+        try:
+            end = arrival + timedelta(days=policy['coverage_days'])
+        except OverflowError:
+            problem('policies', 'coverage_days', 'DATE_RANGE', '補充期間が日付の計算可能範囲を超えています', value=str(policy['coverage_days']))
+            continue
+        available_days = sorted(date.fromisoformat(value) for value in forecasts if start <= date.fromisoformat(value) < end)
+        next_day = start
+        def missing(first, last):
+            suffix = f'（{last}までの連続欠落）' if last != first else ''
+            problem('forecast', 'quantity_p', 'FORECAST_MISSING', f'予測日={first}: 需要予測欠損{suffix}', first, (w, p, first.isoformat()))
+        for day in available_days:
+            if day > next_day:
+                missing(next_day, day - timedelta(days=1))
+            row = forecasts[day.isoformat()]
+            if stamp(row['as_of']).date() > dispatch:
+                problem('forecast', 'as_of', 'FORECAST_AFTER_DISPATCH', '予測基準日が出荷日より未来', day, (w, p, day.isoformat()), row['as_of'])
             elif day < arrival:
                 before += row['quantity_p']
             else:
                 demand += row['quantity_p']
-            day += timedelta(days=1)
+            next_day = day + timedelta(days=1)
+        if next_day < end:
+            missing(next_day, end - timedelta(days=1))
         transit = 0
         receipts = {}
         for r in t['transit']:
             if (r['warehouse'], r['product']) == (w, p):
                 day = date.fromisoformat(r['arrival_date'])
                 if day <= start:
-                    errors.append(f'{context}: 輸送中 {r["shipment_id"]} は在庫基準日以前到着（二重計上疑い）')
+                    problem('transit', 'arrival_date', 'TRANSIT_ALREADY_ARRIVED', f'輸送中 {r["shipment_id"]} は在庫基準日以前到着（二重計上疑い）', day, (r['shipment_id'],), r['arrival_date'])
                 elif day <= arrival:
                     transit += r['quantity_p']
                     receipts[day] = receipts.get(day, 0) + r['quantity_p']
+        if len(errors) != issue_start:
+            continue
         # Preserve the aggregate replenishment formula while exposing timing risk.
         # A receipt on arrival day must not conceal a deficit on an earlier day.
         timeline, balance = [], inv['quantity_p']
@@ -266,12 +235,37 @@ def calculate(data, dispatch):
     return lines
 
 
+def morning_stock_issues(data, dispatch, now=None):
+    now = now or now_jst()
+    issues = []
+    if dispatch != now.astimezone(JST).date():
+        issues.append(ValidationIssue('対象日', 'dispatch', 'FORMAL_DAY', '正式発行は本日のみ', date=dispatch.isoformat(), phase='morning_stock'))
+    for product in data.tables['products']:
+        p = product['product']
+        rows = [r for r in data.tables['dry_stock'] if r['product'] == p]
+        if not rows:
+            issues.append(ValidationIssue('dry_stock.csv', 'quantity_p', 'MORNING_MISSING', '当日朝の現物確認在庫欠損', product=p, warehouse='DRY', date=dispatch.isoformat(), phase='morning_stock'))
+        for r in rows:
+            def problem(field, code, message):
+                issues.append(ValidationIssue('dry_stock.csv', field, code, message,
+                                              line=data.locations.get('dry_stock', {}).get((p, r['lot'])),
+                                              product=p, warehouse='DRY', lot=r['lot'], date=dispatch.isoformat(),
+                                              value=r[field], phase='morning_stock'))
+            checked = stamp(r['checked_at'])
+            if checked.date() != dispatch or checked.time() >= time(12) or checked > now:
+                problem('checked_at', 'MORNING_TIME', '当日朝の現物確認ではない')
+            if r['source'] != 'physical':
+                problem('source', 'PHYSICAL_REQUIRED', '現物確認不能')
+            if r['confirmed'] != 'yes':
+                problem('confirmed', 'CONFIRMED_REQUIRED', '現物確認不能')
+            if not r['checker'].strip():
+                problem('checker', 'CHECKER_REQUIRED', '現物確認者が欠損')
+    return issues
+
+
 def validate(data, lines, dispatch, now=None):
     """Recompute all safety checks; never rely on previous UI confirmations."""
-    now = now or now_jst()
-    errors = []
-    if dispatch != now.astimezone(JST).date():
-        errors.append(f'出荷日={dispatch}: 正式発行は本日のみ')
+    errors = [str(issue) for issue in morning_stock_issues(data, dispatch, now)]
     expected = calculate(data, dispatch)
     expected_keys = {(r['warehouse'], r['product']) for r in expected}
     actual_keys = [(r['warehouse'], r['product']) for r in lines]
@@ -281,16 +275,6 @@ def validate(data, lines, dispatch, now=None):
     products = {r['product']: r for r in t['products']}
     stocks = {(r['product'], r['lot']): r for r in t['dry_stock']}
     used = {}
-    for p in products:
-        rows = [r for r in t['dry_stock'] if r['product'] == p]
-        if not rows:
-            errors.append(f'乾麺倉庫 商品={p}: 当日朝の現物確認在庫欠損')
-        for r in rows:
-            checked = stamp(r['checked_at'])
-            if checked.date() != dispatch or checked.time() >= time(12) or checked > now:
-                errors.append(f'乾麺倉庫 商品={p} ロット={r["lot"]}: 当日朝の現物確認ではない')
-            if r['source'] != 'physical' or r['confirmed'] != 'yes' or not r['checker'].strip():
-                errors.append(f'乾麺倉庫 商品={p}: 現物確認不能')
     for line in lines:
         w, p, qty = line['warehouse'], line['product'], line['quantity_p']
         context = f'倉庫={w} 商品={p} 出荷日={dispatch}'

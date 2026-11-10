@@ -14,6 +14,7 @@ from . import __version__
 
 from .core import DataError, LABELS, allocation_label, now_jst, shortages, units, validate
 from .backup import create_backup, inspect_backup, restore_backup
+from .diagnostics import PHASE_LABELS, STATUS_LABELS, diagnose, export_report, export_template
 from .lot_dialog import LotAllocationDialog
 from .planning import comparison_text
 from .service import Service, write_reports
@@ -119,6 +120,45 @@ class App:
         ttk.Label(maintenance, text='現行データは上書きしません。復元履歴は閲覧専用です。本番復帰にはバックアップ後の出荷・改訂との照合が必要です。切替前に必要な画面編集を仮指示として保存してください。', wraplength=1080).pack(anchor='w', pady=8)
         self.backup_result = tk.Text(maintenance, height=9, wrap='word', state='disabled')
         self.backup_result.pack(fill='both', expand=True)
+        diagnostics = ttk.Frame(tabs, padding=12)
+        tabs.add(diagnostics, text='取込前診断・項目対応')
+        self.diagnostic_report = None
+        self.diagnostic_folder = tk.StringVar()
+        self.diagnostic_day = tk.StringVar(value=self.day.get())
+        self.diagnostic_summary = tk.StringVar(value='実CSV対応は未確認です。仮データ契約v0の診断で、データ取込や正式発行の確認ではありません。')
+        ttk.Label(diagnostics, textvariable=self.diagnostic_summary, wraplength=1080).pack(anchor='w', pady=6)
+        folder_bar = ttk.Frame(diagnostics)
+        folder_bar.pack(fill='x', pady=6)
+        ttk.Label(folder_bar, text='診断フォルダー').pack(side='left')
+        ttk.Entry(folder_bar, textvariable=self.diagnostic_folder, state='readonly', width=60).pack(side='left', padx=5)
+        ttk.Button(folder_bar, text='フォルダーを選択', command=self.select_diagnostic_folder).pack(side='left', padx=5)
+        diag_bar = ttk.Frame(diagnostics)
+        diag_bar.pack(fill='x', pady=6)
+        ttk.Label(diag_bar, text='診断対象出荷日').pack(side='left')
+        ttk.Entry(diag_bar, textvariable=self.diagnostic_day, width=14).pack(side='left', padx=5)
+        ttk.Button(diag_bar, text='診断を実行（取込しません）', command=lambda: self.run(self.run_diagnostic)).pack(side='left', padx=5)
+        self.diagnostic_save = ttk.Button(diag_bar, text='JSON・印刷HTMLを新規保存', command=lambda: self.run(self.save_diagnostic), state='disabled')
+        self.diagnostic_save.pack(side='left', padx=5)
+        ttk.Button(diagnostics, text='実CSV項目対応表の未確認ひな形を保存', command=lambda: self.run(self.save_mapping_template)).pack(anchor='w', pady=6)
+        issue_frame = ttk.Frame(diagnostics)
+        issue_frame.pack(fill='both', expand=True)
+        columns = ('phase', 'filename', 'line', 'product', 'warehouse', 'date', 'field', 'code', 'message')
+        self.diagnostic_tree = ttk.Treeview(issue_frame, columns=columns, show='headings', height=7)
+        for name, label, width in zip(columns, ('区分', 'ファイル', '行', '商品', '倉庫', '対象日／基準日時', '項目', 'コード', '理由'), (110, 150, 60, 100, 100, 200, 160, 180, 420)):
+            self.diagnostic_tree.heading(name, text=label)
+            self.diagnostic_tree.column(name, width=width)
+        vertical = ttk.Scrollbar(issue_frame, orient='vertical', command=self.diagnostic_tree.yview)
+        horizontal = ttk.Scrollbar(issue_frame, orient='horizontal', command=self.diagnostic_tree.xview)
+        self.diagnostic_tree.configure(yscrollcommand=vertical.set, xscrollcommand=horizontal.set)
+        self.diagnostic_tree.grid(row=0, column=0, sticky='nsew')
+        vertical.grid(row=0, column=1, sticky='ns')
+        horizontal.grid(row=1, column=0, sticky='ew')
+        issue_frame.columnconfigure(0, weight=1)
+        issue_frame.rowconfigure(0, weight=1)
+        self.diagnostic_details = tk.Text(diagnostics, height=6, wrap='word', state='disabled')
+        self.diagnostic_details.pack(fill='x', pady=6)
+        self.diagnostic_folder.trace_add('write', lambda *_: self.invalidate_diagnostic())
+        self.diagnostic_day.trace_add('write', lambda *_: self.invalidate_diagnostic())
         self.day.trace_add('write', lambda *_: self.invalidate())
         self.qty.trace_add('write', lambda *_: self.ack.set(False))
         self.lot.trace_add('write', lambda *_: self.ack.set(False))
@@ -131,6 +171,55 @@ class App:
         button = ttk.Button(parent, **options)
         self.write_buttons.append(button)
         return button
+
+    def invalidate_diagnostic(self):
+        self.diagnostic_report = None
+        self.diagnostic_tree.delete(*self.diagnostic_tree.get_children())
+        self.diagnostic_save.configure(state='disabled')
+        self.diagnostic_summary.set('診断条件が変わりました。再診断が必要です。実CSV対応・業務承認は未確認です。')
+        self.diagnostic_details.configure(state='normal')
+        self.diagnostic_details.delete('1.0', 'end')
+        self.diagnostic_details.configure(state='disabled')
+
+    def select_diagnostic_folder(self):
+        folder = filedialog.askdirectory(title='読み取りだけを行うCSVフォルダー')
+        if folder:
+            self.diagnostic_folder.set(folder)
+
+    def run_diagnostic(self):
+        self.invalidate_diagnostic()
+        self.ack.set(False)
+        if not self.diagnostic_folder.get():
+            raise DataError(['診断フォルダーを選択してください'])
+        dispatch = date.fromisoformat(self.diagnostic_day.get())
+        report = diagnose(self.diagnostic_folder.get(), dispatch, self.service.clock())
+        self.diagnostic_report = report
+        for i, issue in enumerate(report['issues']):
+            display = dict(issue, phase=PHASE_LABELS[issue['phase']])
+            self.diagnostic_tree.insert('', 'end', iid=str(i), values=tuple(display.get(field) if display.get(field) is not None else '—' for field in self.diagnostic_tree['columns']))
+        status = '不備あり' if report['issues'] else '仮契約の入力不備は検出されませんでした'
+        self.diagnostic_summary.set(f'{status}: {len(report["issues"])}件。正式発行可の判定ではありません。実CSV対応・業務承認は未確認です。')
+        details = [f'対象出荷日: {report["dispatch"]}／診断日時: {report["checked_at"]}',
+                   f'仮契約適合: {"適合" if report["contract_compatible"] else "不適合"}／計算条件: {"確認可" if report["calculation_possible"] else "不備あり・未実施"}',
+                   *report['skipped_checks'], *report['limitations']]
+        details.extend(f'{info["filename"]}: {STATUS_LABELS[info["status"]]}／列={info["headers"]}／原本SHA-256={info["sha256"] or "未取得"}' for info in report['files'])
+        self.diagnostic_details.configure(state='normal')
+        self.diagnostic_details.insert('1.0', '\n'.join(details))
+        self.diagnostic_details.configure(state='disabled')
+        self.diagnostic_save.configure(state='normal')
+
+    def save_diagnostic(self):
+        if self.diagnostic_report is None:
+            raise DataError(['先に診断を実行してください'])
+        path = filedialog.asksaveasfilename(title='診断結果の新規保存先（入力フォルダー外）', defaultextension='.json', filetypes=[('診断JSON', '*.json')], confirmoverwrite=False)
+        if path:
+            outputs = export_report(self.diagnostic_report, path)
+            self.open_report(outputs[1])
+
+    def save_mapping_template(self):
+        path = filedialog.asksaveasfilename(title='未確認の項目対応表を新規保存', initialfile='csv-mapping-review.json', defaultextension='.json', filetypes=[('項目対応表JSON', '*.json')], confirmoverwrite=False)
+        if path:
+            export_template(path, self.diagnostic_folder.get() or None)
 
     def update_mode(self):
         for button in self.write_buttons:
