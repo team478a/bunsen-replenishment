@@ -1,0 +1,2 @@
+shipment_id,warehouse,product,quantity_p,arrival_date,confirmed
+S-EXAMPLE-001,SUGITO,P001,24,2026-11-11,yes

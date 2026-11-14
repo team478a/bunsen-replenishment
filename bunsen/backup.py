@@ -17,7 +17,7 @@ import time
 import uuid
 import zipfile
 
-from .core import DataError, SCHEMA, now_jst, stamp
+from .core import DataError, SCHEMA, V2_SCHEMA, now_jst, stamp
 
 MAX_FILE = 1024 ** 3
 MAX_TOTAL = 2 * MAX_FILE
@@ -50,7 +50,7 @@ def copy_limited(source, destination, limit):
 
 
 def raw_digest(raw):
-    if not isinstance(raw, dict) or not raw or any(name not in {k + '.csv' for k in SCHEMA} or not isinstance(value, str) for name, value in raw.items()):
+    if not isinstance(raw, dict) or not raw or any(name not in {k + '.csv' for k in (SCHEMA.keys() | V2_SCHEMA.keys())} or not isinstance(value, str) for name, value in raw.items()):
         raise DataError(['取込原本の形式が不正'])
     return hashlib.sha256(json.dumps(raw, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 

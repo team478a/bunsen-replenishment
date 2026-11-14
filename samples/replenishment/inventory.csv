@@ -1,0 +1,3 @@
+warehouse,product,quantity_p,as_of,basis,confirmed
+KOBE,P001,120,2026-11-09T07:00:00+09:00,opening,yes
+SUGITO,P001,48,2026-11-09T07:00:00+09:00,opening,yes

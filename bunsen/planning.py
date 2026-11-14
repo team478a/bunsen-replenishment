@@ -15,6 +15,9 @@ def keyed(lines):
 
 
 def overlay(calculated, instructions):
+    if calculated and calculated[0].get('workflow') == 2:
+        from .replenishment import overlay as v2_overlay
+        return v2_overlay(calculated,instructions)
     current, requested = keyed(calculated), keyed(instructions)
     if current.keys() != requested.keys():
         errors = []
@@ -57,6 +60,7 @@ def comparison_text(reference, warehouse=None):
     labels = {'products': '商品マスタ', 'warehouses': '配送設定', 'policies': '補充設定',
               'inventory': '配送先在庫', 'forecast': '需要予測', 'transit': '輸送中',
               'vehicles': '車両設定', 'dry_stock': '乾麺現物在庫'}
+    labels['replenishment'] = 'ムロオ補充条件'
     result = [f'再開元仮指示: {reference["number"]}（{reference["at"]}）',
               f'元データ {reference["digest"][:16]} → 現在データ {reference["current_digest"][:16]}',
               '変更された入力区分: ' + ('、'.join(labels[name] for name in reference['changed_tables']) or 'なし')]

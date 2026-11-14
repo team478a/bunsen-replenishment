@@ -13,7 +13,7 @@ from bunsen.acceptance import CASES, create_kit, prepare_trial_home
 from bunsen.backup import create_backup, restore_backup
 from bunsen.core import DataError, JST, calculate, load
 from bunsen.service import Service, report_html
-from bunsen.ui import App
+from bunsen.ui import LegacyApp as App
 from test_workflow import ROOT
 
 DAY = date(2026, 11, 10)

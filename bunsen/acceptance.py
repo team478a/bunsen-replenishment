@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 from . import __version__
-from .core import DATES, TIMESTAMPS, SCHEMA, DataError, now_jst
+from .core import DATES, TIMESTAMPS, SCHEMA, V2_SCHEMA, DataError, now_jst
 from .resources import resource_root
 
 SOURCE_DAY = date(2026, 11, 9)
@@ -31,12 +31,14 @@ def _digest(content):
     return hashlib.sha256(content).hexdigest()
 
 
-def _csv_paths():
+def _csv_paths(workflow=0):
+    if workflow == 2:
+        return [f'samples/{scenario}/{name}.csv' for scenario in ('replenishment','replenishment-provisional') for name in V2_SCHEMA]
     return [f'samples/{scenario}/{name}.csv' for scenario in SCENARIOS for name in SCHEMA
             if name != 'dry_stock' or scenario != 'before_morning']
 
 
-def create_kit(output, dispatch, now=None):
+def create_kit(output, dispatch, now=None, *, workflow=0):
     """No arbitrary source folder: real inputs can never be date-shifted here."""
     output = Path(output).resolve()
     if output.exists():
@@ -44,11 +46,11 @@ def create_kit(output, dispatch, now=None):
     delta = timedelta(days=(dispatch - SOURCE_DAY).days)
     contents, sources = {}, {}
     try:
-        for relative in _csv_paths():
+        for relative in _csv_paths(workflow):
             original = (resource_root() / relative).read_bytes()
             sources[relative] = _digest(original)
             reader = csv.DictReader(io.StringIO(original.decode('utf-8-sig')))
-            if reader.fieldnames != SCHEMA[Path(relative).stem].split(','):
+            if reader.fieldnames != (V2_SCHEMA if workflow==2 else SCHEMA)[Path(relative).stem].split(','):
                 raise DataError(['同梱サンプルの列が仮契約と一致しません'])
             stream = io.StringIO(newline='')
             writer = csv.DictWriter(stream, fieldnames=reader.fieldnames, lineterminator='\n')
@@ -67,6 +69,8 @@ def create_kit(output, dispatch, now=None):
                     trial_only=True, dispatch=dispatch.isoformat(), source_dispatch=SOURCE_DAY.isoformat(),
                     days_shifted=delta.days, created_at=(now or now_jst()).isoformat(),
                     source_files=sources, files={p: _digest(b) for p, b in contents.items()})
+    if workflow==2:
+        manifest['workflow']=2
     # Editable human evidence is deliberately not part of the immutable CSV hashes.
     record = dict(format='bunsen-acceptance-record', version=1, trial_only=True,
                   dispatch=dispatch.isoformat(), application_version=__version__,
@@ -76,7 +80,10 @@ def create_kit(output, dispatch, now=None):
                               actual=None, evidence=None, operator=None, performed_at=None)
                          for key, title, expected in CASES])
     contents['acceptance-record.json'] = json.dumps(record, ensure_ascii=False, indent=2).encode('utf-8')
-    contents['GUIDE.md'] = _guide(dispatch).encode('utf-8')
+    if workflow==2:
+        record['cases']=[dict(id=key,title=label,status='not_performed',actual=None,evidence=None,operator=None,performed_at=None) for key,label in [('import','ムロオ在庫・既存予測・補充条件取込'),('calculate','倉庫別の日別計算と甲切上げ'),('edit','数量・理由・担当者の修正履歴'),('provisional','未確定予測の正式確定停止'),('output','神戸・杉戸別Excel/PDFと日本語表示'),('history','旧履歴保持とバックアップ閲覧専用')]]
+        contents['acceptance-record.json']=json.dumps(record,ensure_ascii=False,indent=2).encode('utf-8')
+    contents['GUIDE.md'] = (_guide_v2(dispatch) if workflow==2 else _guide(dispatch)).encode('utf-8')
     contents['kit.json'] = json.dumps(manifest, ensure_ascii=False, indent=2).encode('utf-8')
     # Reserve a new directory exclusively. On failure remove only paths we created.
     output.mkdir(parents=True, exist_ok=False)
@@ -144,7 +151,8 @@ def prepare_trial_home(folder):
         manifest = json.loads((folder / 'kit.json').read_text(encoding='utf-8'))
         if (manifest.get('format') != 'bunsen-acceptance-kit' or manifest.get('version') != 1
                 or manifest.get('application_version') != __version__
-                or manifest.get('trial_only') is not True or set(manifest['files']) != set(_csv_paths())):
+                or manifest.get('workflow',0) not in (0,2)
+                or manifest.get('trial_only') is not True or set(manifest['files']) != set(_csv_paths(manifest.get('workflow',0)))):
             raise ValueError('未対応のキットまたはアプリ版の不一致')
         date.fromisoformat(manifest['dispatch'])
         for relative, expected in manifest['files'].items():
@@ -172,3 +180,26 @@ def prepare_trial_home(folder):
         return home, date.fromisoformat(manifest['dispatch'])
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
         raise DataError([f'受入キットを確認できません。新規生成してください: {exc}']) from exc
+
+
+def _guide_v2(dispatch):
+    return f'''# ムロオ必要補充方式の架空試用 - 実出荷に使用しない
+
+試験日 {dispatch}、版 {__version__}。同梱の架空サンプルだけを同じ日数だけ移しています。
+`BunsenReplenishment.exe --trial-kit "このキットの絶対パス"` または
+`python -m bunsen --trial-kit "このキットの絶対パス"`で起動します。
+履歴はキット内trial-dataへ分離します。ブンセン在庫・朝照合は不要です。
+
+1. samples/replenishmentを取込し、分析・補充計算を実行します。
+2. 神戸120P、杉戸48P、必要P・換算後P・PL＋甲・在庫/予測/入庫基準を確認します。
+3. 担当者名を入れ、必要なら数量と理由を修正・反映します。確認チェック後に正式確定します。
+4. 出力ボタンで神戸・杉戸別のExcel/PDF/HTMLを新しい保存先へ出力し、日本語・数量・ページ割りを確認します。
+5. samples/replenishment-provisionalは明示選択で参考分析できますが正式確定は停止します。
+6. 管理画面の設定変更は根拠・担当者確認を記録します。変更後は再分析・再確認します。
+
+サンプルのムロオ在庫は試験日07時の宣言です。それ以前は未来データとして停止します。
+これは朝のブンセン在庫確認条件ではありません。時計や検証を変更しないでください。
+試験日や版が異なる場合は新規キットを生成してください。設定値は架空例で業務承認済みではありません。
+受入記録は全件未実施・承認未確認です。人が確認した結果だけを記入します。
+必要補充数量は実出荷実績や供給可能在庫の保証ではありません。
+'''
