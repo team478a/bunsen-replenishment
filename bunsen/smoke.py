@@ -13,7 +13,7 @@ from .core import DataError, JST
 from .resources import resource_root
 from .diagnostics import diagnose, export_report, mapping_template
 from .service import write_reports
-from .ui import App
+from .ui import LegacyApp as App
 from .outlook import export_outlook
 from datetime import datetime
 
@@ -125,9 +125,41 @@ def run_smoke(output):
                 os.environ.pop('LOCALAPPDATA', None)
             else:
                 os.environ['LOCALAPPDATA'] = previous
+        run_v2_smoke(home)
+        checks.append('destination_only_v2_ui_excel_pdf')
     result = dict(version=__version__, frozen=bool(getattr(sys, 'frozen', False)),
                   executable=Path(sys.executable).name, checks=checks, success=True)
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open('x', encoding='utf-8') as stream:
         json.dump(result, stream, ensure_ascii=False, indent=2)
     return result
+
+
+def run_v2_smoke(home):
+    from .ui import App as OperationalApp
+    from .shipping_output import write_documents
+    target=home/'v2-runtime'
+    target.mkdir()
+    (target/'trial-info.json').write_text('{"format":"bunsen-trial-home","version":1,"trial_only":true}')
+    root=tk.Tk();root.withdraw();current=None
+    try:
+        current=OperationalApp(root,target)
+        current.service.clock=lambda:datetime(2026,11,9,9,tzinfo=JST)
+        current.data=current.service.import_folder(resource_root()/'samples/replenishment')
+        current.day.set('2026-11-09');current.compute()
+        assert [r['quantity_p'] for r in current.lines]==[120,48]
+        assert 'dry_stock' not in current.data.tables
+        current.operator.set('架空担当者');current.ack.set(True);current.issue(True)
+        payload=current.service.report_payload(current.last_number)
+        assert payload['workflow']==2 and payload['trial_only']
+        files=write_documents(payload,target/'reports')
+        assert sum(p.suffix=='.pdf' for p in files)==2 and sum(p.suffix=='.xlsx' for p in files)==2
+        current.data=current.service.import_folder(resource_root()/'samples/replenishment-provisional')
+        current.allow_provisional.set(True);current.compute();current.ack.set(True)
+        try:current.issue(True)
+        except DataError as exc:
+            assert any('未確定' in e for e in exc.errors)
+        else:raise AssertionError('V2 provisional forecast was formally issued')
+    finally:
+        if current is not None:current.close()
+        else:root.destroy()

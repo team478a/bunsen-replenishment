@@ -16,8 +16,9 @@ def _signature(path):
 
 
 class InputGuard:
-    def __init__(self, folder):
+    def __init__(self, folder, ignored_names=()):
         self.folder = folder
+        self.ignored_names = set(ignored_names)
         info = folder.stat()
         self.folder_identity = (info.st_dev, info.st_ino)
         self.initial = self._inventory()
@@ -28,7 +29,7 @@ class InputGuard:
         if (info.st_dev, info.st_ino) != self.folder_identity:
             raise OSError('CSVフォルダー自体が差し替えられました')
         return {path.name: _signature(path) for path in self.folder.iterdir()
-                if path.suffix.lower() == '.csv'}
+                if path.suffix.lower() == '.csv' and path.name not in self.ignored_names}
 
     def remember(self, path, content):
         self.contents[path.name] = content

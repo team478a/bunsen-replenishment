@@ -5,7 +5,7 @@ import html
 import json
 from pathlib import Path
 
-from .core import (DataError, NUMBERS, POSITIVE, SCHEMA, TIMESTAMPS, DATES,
+from .core import (DataError, NUMBERS, POSITIVE, SCHEMA, V2_SCHEMA, TIMESTAMPS, DATES,
                    ValidationIssue, calculate, inspect_folder, morning_stock_issues, now_jst)
 from .ingest import ENUMS
 
@@ -25,11 +25,12 @@ LIMITATIONS = [
 ]
 
 
-def diagnose(folder, dispatch, now=None):
+def diagnose(folder, dispatch, now=None, *, workflow=None):
     now = now or now_jst()
-    inspection = inspect_folder(folder, now)
+    inspection = inspect_folder(folder, now,workflow=workflow)
     issues = list(inspection.issues)
     skipped = list(inspection.skipped_checks)
+    v2 = any(f['filename']=='replenishment.csv' for f in inspection.files)
     calculation_checked, calculation_possible, morning_checked = False, False, False
     warnings = []
     if inspection.dataset is not None:
@@ -41,13 +42,17 @@ def diagnose(folder, dispatch, now=None):
                         for row in lines if row['warning']]
         except DataError as exc:
             issues.extend(exc.issues or [ValidationIssue('計算条件', None, 'CALCULATION_FAILURE', message, phase='calculation') for message in exc.errors])
-        issues.extend(morning_stock_issues(inspection.dataset, dispatch, now))
-        morning_checked = True
+        if inspection.dataset.workflow != 2:
+            issues.extend(morning_stock_issues(inspection.dataset, dispatch, now))
+            morning_checked = True
+        else:
+            skipped.append('新方式ではブンセン在庫・朝照合は対象外です')
     else:
-        skipped.extend(['計算条件チェック（入力不備のため未実施）', '朝現物在庫条件チェック（入力不備のため未実施）'])
+        skipped.append('計算条件チェック（入力不備のため未実施）')
+        skipped.append('新方式ではブンセン在庫・朝照合は対象外です' if v2 else '朝現物在庫条件チェック（入力不備のため未実施）')
     files = inspection.files
     fingerprint = hashlib.sha256(json.dumps([(f['filename'], f['exists'], f['sha256']) for f in files], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
-    return dict(format='bunsen-csv-diagnostic', version=1, schema='v0-provisional',
+    return dict(format='bunsen-csv-diagnostic', version=1, schema='v2-provisional-contract' if v2 else 'v0-provisional',
                 checked_at=now.isoformat(), input_folder=str(Path(folder).resolve()),
                 dispatch=dispatch.isoformat(), input_fingerprint=fingerprint,
                 dataset_digest=inspection.dataset.digest if inspection.dataset else None,
@@ -58,7 +63,7 @@ def diagnose(folder, dispatch, now=None):
                 morning_stock_checked=morning_checked,
                 status='issues_found' if issues else 'no_detected_input_issues',
                 issues=[asdict(issue) for issue in issues], files=files,
-                warnings=warnings, skipped_checks=skipped, limitations=list(LIMITATIONS))
+                warnings=warnings, skipped_checks=skipped, limitations=[v for v in LIMITATIONS if not v2 or '現物' not in v])
 
 
 def target_rule(field):
@@ -77,8 +82,8 @@ def target_rule(field):
     return '空欄不可。コード対応・意味は業務側で確認'
 
 
-def mapping_template():
-    return dict(format='bunsen-csv-mapping-review', version=1, target_schema='v0-provisional',
+def mapping_template(*, workflow=0):
+    return dict(format='bunsen-csv-mapping-review', version=1, target_schema='v2-provisional-contract' if workflow==2 else 'v0-provisional',
                 status='unconfirmed', owner=None, approved_at=None,
                 note='確認用のひな形です。取込設定として自動適用しません。未確認値は推測で埋めません。',
                 tables=[dict(target_file=name + '.csv', source_file=None, source_encoding=None,
@@ -87,7 +92,7 @@ def mapping_template():
                                           source_field=None, source_unit=None, conversion_rule=None,
                                           confirmed_by=None, confirmed_at=None, status='unconfirmed')
                                      for field in columns.split(',')])
-                        for name, columns in SCHEMA.items()])
+                        for name, columns in (V2_SCHEMA if workflow==2 else SCHEMA).items()])
 
 
 def report_html(report):
@@ -95,6 +100,8 @@ def report_html(report):
     state = '不備あり' if report['issues'] else '仮契約の入力不備は検出されませんでした'
     checks = [('仮契約の入力検証', report['contract_compatible']), ('計算条件を確認できた', report['calculation_possible']),
               ('朝現物在庫条件のチェック実施', report['morning_stock_checked'])]
+    if report['schema'].startswith('v2'):
+        checks=checks[:2]
     rows = []
     for issue in report['issues']:
         values = [PHASE_LABELS[issue['phase']], issue['filename'], issue['line'] if issue['line'] is not None else '—',
@@ -154,8 +161,8 @@ def export_report(report, json_path):
                            (json_path.with_suffix('.html'), report_html(report))], report['input_folder'])
 
 
-def export_template(path, protected_folder=None):
+def export_template(path, protected_folder=None, *, workflow=0):
     path = Path(path)
     if path.suffix.lower() != '.json':
         raise DataError(['対応表の保存先は.jsonを指定してください'])
-    return _write_outputs([(path, json.dumps(mapping_template(), ensure_ascii=False, indent=2))], protected_folder)[0]
+    return _write_outputs([(path, json.dumps(mapping_template(workflow=workflow), ensure_ascii=False, indent=2))], protected_folder)[0]

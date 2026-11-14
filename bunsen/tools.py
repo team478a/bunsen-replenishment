@@ -48,7 +48,7 @@ def main(argv=None):
         from .acceptance import create_kit
         from .core import DataError
         try:
-            result = create_kit(parsed.output, parsed.dispatch)
+            result = create_kit(parsed.output, parsed.dispatch, workflow=2)
             print(json.dumps(dict(output=str(parsed.output.resolve()), dispatch=result['dispatch'],
                                   trial_only=True, acceptance_status='not_performed'), ensure_ascii=True))
         except (DataError, OSError) as exc:
@@ -70,10 +70,10 @@ def main(argv=None):
         from .diagnostics import diagnose, export_report, export_template
         try:
             if parsed.command == 'mapping-template':
-                path = export_template(parsed.output)
+                path = export_template(parsed.output,workflow=2)
                 print(json.dumps(dict(path=str(path), status='unconfirmed'), ensure_ascii=True))
             else:
-                report = diagnose(parsed.folder, parsed.dispatch)
+                report = diagnose(parsed.folder, parsed.dispatch,workflow=2)
                 paths = export_report(report, parsed.output)
                 print(json.dumps(dict(status=report['status'], issues=len(report['issues']),
                                       formal_issue_allowed=False, outputs=[str(path) for path in paths]), ensure_ascii=True))

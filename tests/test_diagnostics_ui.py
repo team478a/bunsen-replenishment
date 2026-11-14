@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from bunsen.backup import file_digest
 from bunsen.core import DataError, load
-from bunsen.ui import App
+from bunsen.ui import LegacyApp as App
 from test_workflow import NOW, ROOT
 
 

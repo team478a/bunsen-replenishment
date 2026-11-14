@@ -7,13 +7,14 @@ import json
 from pathlib import Path
 from datetime import date
 
-from .core import (DATES, KEYS, NUMBERS, POSITIVE, SCHEMA, TIMESTAMPS, WAREHOUSES,
+from .core import (DATES, KEYS, NUMBERS, POSITIVE, SCHEMA, V2_SCHEMA, TIMESTAMPS, WAREHOUSES,
                    Dataset, ValidationIssue, stamp)
 from .input_guard import InputGuard, unchecked
 
 ENUMS = {'ship_unit': ('PL', 'CASE'), 'rounding': ('ceil', 'floor'),
          'expiry_basis': ('shipment', 'arrival'), 'order_basis': ('included',),
          'source': ('physical',)}
+ENUMS.update(basis=('opening', 'closing'), status=('confirmed', 'provisional', 'imputed'))
 DATE_FIELD = {'forecast': 'date', 'dry_stock': 'checked_at', 'inventory': 'as_of',
               'transit': 'arrival_date', 'policies': 'transit_checked_at'}
 
@@ -27,12 +28,17 @@ class Inspection:
     read_consistency: dict = field(default_factory=unchecked)
 
 
-def inspect_folder(folder, now):
+def inspect_folder(folder, now, *, workflow=None):
     folder = Path(folder)
     issues, files, skipped, raw, locations = [], [], [], {}, {}
     tables = {name: [] for name in SCHEMA}
     records = {name: [] for name in SCHEMA}
     headers_ok = set()
+    v2 = workflow == 2 or (folder / 'replenishment.csv').exists()
+    schema = V2_SCHEMA if v2 else SCHEMA
+    ignored = {'dry_stock.csv', 'vehicles.csv', 'warehouses.csv', 'policies.csv'} if v2 else set()
+    tables = {name: [] for name in schema}
+    records = {name: [] for name in schema}
 
     def issue(table, field, code, message, *, row=None, line=None, value=None):
         row = row or {}
@@ -45,11 +51,11 @@ def inspect_folder(folder, now):
     if not folder.is_dir():
         return Inspection(None, [ValidationIssue(str(folder), None, 'FOLDER_MISSING', 'CSVフォルダーが存在しません')], [], ['CSV検証未実施'])
     try:
-        guard = InputGuard(folder)
-        unknown = sorted(folder / name for name in guard.initial if name not in {name + '.csv' for name in SCHEMA})
+        guard = InputGuard(folder, ignored)
+        unknown = sorted(folder / name for name in guard.initial if name not in {name + '.csv' for name in schema})
     except OSError as exc:
         return Inspection(None, [ValidationIssue(str(folder), None, 'FOLDER_UNREADABLE', f'CSVフォルダーを読めません: {exc}')], [], ['CSV検証未実施'])
-    sources = [(name, folder / (name + '.csv'), columns) for name, columns in SCHEMA.items()]
+    sources = [(name, folder / (name + '.csv'), columns) for name, columns in schema.items()]
     sources.extend((path.stem, path, None) for path in unknown)
     for name, path, expected in sources:
         info = dict(filename=path.name, exists=path.exists(), expected=expected is not None,
@@ -76,7 +82,8 @@ def inspect_folder(folder, now):
             if expected is not None:
                 raw[path.name] = content
                 columns = expected.split(',')
-                if headers != columns:
+                legacy_product_header = v2 and name == 'products' and headers == SCHEMA['products'].split(',')
+                if headers != columns and not legacy_product_header:
                     info['status'] = 'header_error'
                     for field in columns:
                         if field not in headers:
@@ -102,7 +109,8 @@ def inspect_folder(folder, now):
                 if expected is None or name not in headers_ok:
                     continue
                 line = reader.line_num
-                row = {field: (cells[i].strip() if i < len(cells) else '') for i, field in enumerate(headers)}
+                selected_headers = schema[name].split(',') if v2 else headers
+                row = {field: (cells[headers.index(field)].strip() if headers.index(field) < len(cells) else '') for field in selected_headers}
                 records[name].append((line, row))
                 before = len(issues)
                 if len(cells) != len(headers):
@@ -166,7 +174,7 @@ def inspect_folder(folder, now):
             issue('warehouses', 'warehouse', 'ROW_MISSING', '必須の倉庫行欠損', row={'warehouse': warehouse})
         if catalog_ready:
             for product in sorted(products):
-                for name in ('inventory', 'policies', 'vehicles'):
+                for name in (('inventory', 'replenishment') if v2 else ('inventory', 'policies', 'vehicles')):
                     if name in headers_ok and not any(row['warehouse'] == warehouse and row['product'] == product for _, row in records[name]):
                         issue(name, 'warehouse+product', 'ROW_MISSING', '必須行欠損', row={'warehouse': warehouse, 'product': product})
     guard_issues, consistency = guard.finish()
@@ -185,4 +193,6 @@ def inspect_folder(folder, now):
     for info in files:
         if info['status'] == 'checked' and info['filename'] in invalid_files:
             info['status'] = 'invalid'
-    return Inspection(None if issues else Dataset(tables, raw, digest, locations), issues, files, skipped, consistency)
+    if v2:
+        skipped.append('ブンセン在庫・朝照合・出荷ロット/期限/車両検証は新方式の対象外。必要補充指示は実出荷実績ではありません。')
+    return Inspection(None if issues else Dataset(tables, raw, digest, locations, 2 if v2 else 0), issues, files, skipped, consistency)

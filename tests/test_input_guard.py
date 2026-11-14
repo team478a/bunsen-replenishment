@@ -11,7 +11,7 @@ from bunsen.core import DataError, calculate, inspect_folder, load
 from bunsen.diagnostics import diagnose, export_report, report_html
 from bunsen.input_guard import InputGuard
 from bunsen.service import Service
-from bunsen.ui import App
+from bunsen.ui import LegacyApp as App
 from test_workflow import ROOT, DAY, NOW
 
 

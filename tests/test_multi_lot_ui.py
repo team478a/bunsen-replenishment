@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from bunsen.core import DataError, load
-from bunsen.ui import App
+from bunsen.ui import LegacyApp as App
 from test_workflow import NOW
 
 ROOT = Path(__file__).resolve().parent.parent

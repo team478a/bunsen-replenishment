@@ -1,58 +1,37 @@
-# CSVデータ契約 v0（仮）
+# 新方式CSV仮契約 v2
 
-**既存CSVの仕様は未確認。実システムとの接続完了を意味しない。** UTF-8（BOM可）、ヘッダー必須、日付YYYY-MM-DD、日時ISO8601（タイムゾーン必須、JST運用）、整数は0以上。空欄・未確認・重複キー・不正日付・未知商品／倉庫は不備として表示。数量0は明示された確認済みの0として有効。空欄と区別する。確認済みの行は`confirmed=yes`、それ以外は使用不可。数値の推測補完をしない。
+実CSV仕様は未確認。以下はアプリ用の仮契約で、接続完了や業務承認を示さない。UTF-8(BOM可)、ヘッダー名・順序を厳密検証。欠損・未確認・不正値を推定/0補完しない。全確認日時はタイムゾーン付きISO8601、対象日はYYYY-MM-DD、数量/日数は0以上の整数。商品換算・cycle_days・coverage_daysは正整数。
 
-| ファイル | 必須列 | 一意キー／意味 |
-|---|---|---|
-| products.csv | product,name,p_per_ball,balls_per_case,cases_per_pl,ship_unit,weight_g,min_remaining_days,confirmed | product。ship_unitはPLまたはCASE。係数・重量は正整数 |
-| warehouses.csv | warehouse,lead_days,confirmed | warehouse。KOBE/SUGITO両方必須 |
-| policies.csv | warehouse,product,coverage_days,safety_p,rounding,expiry_basis,transit_checked_at,confirmed | warehouse+product。全組合せ必須。rounding=ceil/floor、expiry_basis=shipment/arrival。輸送中全件確認日時必須 |
-| inventory.csv | warehouse,product,quantity_p,as_of,confirmed | warehouse+product。全組合せ必須。as_ofは当該日の需要控除前の始業在庫 |
-| forecast.csv | warehouse,product,date,quantity_p,as_of,order_basis | warehouse+product+date。order_basis=includedのみ。quantity_pは予測P。as_ofは予測作成日時 |
-| transit.csv | shipment_id,warehouse,product,quantity_p,arrival_date,confirmed | shipment_id。ヘッダーのみは、各policyのtransit_checked_atによって確認済み0件を意味する |
-| vehicles.csv | warehouse,product,capacity_g,confirmed | warehouse+product専用便。全組合せ必須。0は出荷不可 |
-| dry_stock.csv | product,lot,quantity_p,best_before,checked_at,checker,source,confirmed | product+lot。source=physicalのみ。正式発行は出荷当日の朝（00:00〜11:59 JST）、未来時刻不可、確認者必須 |
+## 必須ファイル
 
-products以外の未定義列もエラーとし、誤った単位や注文列の黙認を防ぐ。dry_stock.csvだけは仮指示時に省略可。確認済み0在庫は数量0のロット行で表す。正式発行時は全商品で行が必要。朝在庫はロット網羅の申告値であり、CSVだけで現物確認の真正性は証明できない。確認者が全ロットを記録する責任を持つ。
+replenishment.csvの存在で新方式を識別する。全商品の神戸・杉戸について在庫/設定の一意な組合せが必要。
 
-取込フォルダー直下に契約外のCSVがあれば、拡張子の大小文字を問わず取込全体を停止し、ファイル名を表示する。正式ファイル名は上表の小文字表記に固定する。注文・製造予定のCSVを黙って無視して取込完了とは表示しない。CSV以外のメモ等は読み込まない。
+| ファイル | 列（この順） |
+|---|---|
+| products.csv | product,name,p_per_ball,balls_per_case,cases_per_pl,ship_unit,confirmed |
+| inventory.csv | warehouse,product,quantity_p,as_of,basis,confirmed |
+| forecast.csv | warehouse,product,date,quantity_p,as_of,order_basis,status |
+| transit.csv | shipment_id,warehouse,product,quantity_p,arrival_date,confirmed |
+| replenishment.csv | warehouse,product,cycle_days,lead_days,safety_days,coverage_days,transit_checked_at,confirmed |
 
-輸送中の網羅確認日時は配送先在庫as_ofと一致させる。予測as_ofと在庫as_ofは出荷日以前、将来データは禁止。計算に必要な連続日付は配送先在庫の基準日から到着日＋coverage_days−1まで。欠落日は明示して停止する。確認時刻は取込時にも未来でないことを検証する。現物在庫の当日朝条件は正式発行時に検証する。
+products.csvは旧フル列（product,name,p_per_ball,balls_per_case,cases_per_pl,ship_unit,weight_g,min_remaining_days,confirmed）も受け付け、weight_g/min_remaining_daysは新方式で使用・検証しない。商品換算と確認区分は同じ項目を再利用する。
 
-本番CSVのコード対応、締時刻、輸送中と在庫の境界、注文内包方式、鮮度の許容時間、商品重量以外の積載条件を合意してから契約を改訂する。ファイル単位の差分追加入力は不可で、常に一式を取り込む。
+warehouseはKOBE/SUGITO。ship_unitはPL/CASE。confirmedはyesのみ（確認済み実データの宣言）。forecastは予測値で、statusはconfirmed/provisional/imputed。confirmed予測も実績や確定在庫ではない。order_basis=includedは確定注文を既存予測に含む宣言で、注文CSVを別加算しない。
 
-## 第3段階のロット分割と履歴形式
+inventory.basis=openingは基準日の始業在庫、closingは基準日の終業在庫。日中途中の在庫は残り時間の予測と対応できないため、そのまま読み替えずデータ責任者が基準を整備する。as_ofは元データの基準/更新日時。基準日の需要を含めるかはbasisで明示する。
 
-CSV列は変更しない。dry_stock.csvには商品・ロットの組合せごとに現物数量・期限・確認者を記録する。ロット番号は異なる商品で同じ文字列を使用でき、在庫は商品別に区別する。
+transit_checked_atは在庫と同じ基準日時で、在庫未反映の確定入庫を網羅した確認。入庫0件の場合もヘッダーのみのtransit.csvとこの宣言を必須とし、ファイル欠損を0件にしない。shipment_idの重複、未知商品/倉庫、在庫反映済みの日付の入庫は拒否する。未確定予定はconfirmed=yesへ変換しない。
 
-SQLiteの既存JSONスナップショットでは、明細の`quantity_p`を指示総量として維持し、複数ロット指定時のみ`allocations: [{"lot": "L001", "quantity_p": 72}, ...]`を追加する。この場合、旧`lot`欄は空とし、単一ロット形式と併用しない。各割当のキーはlotとquantity_pのみ。数値の空欄・文字列・負数・ゼロ・真偽値を拒否し、正式発行では合計一致・甲単位・期限・在庫を検証する。
+cycle_daysとcoverage_daysの長い方を対象期間とし、safety_daysは各日末に翌日から必要な予測日数。値は設定として保存し、業務上の正式値を推測しない。サンプルは架空例。
 
-`allocations`のない既存明細は従来のlot＋quantity_pとして読む。空の割当を指示総量0へ補完しない。DBテーブル変更・旧履歴の書換えは行わない。
+## 使用しない入力
 
-## 第4段階の再開元情報
+新方式でdry_stock.csv、vehicles.csv、warehouses.csv、policies.csvは使用も検証もしない。残置された旧ファイルがあっても計算・確定に影響させず、取込原本/ハッシュにも含めない。それ以外の契約外CSVは黙って無視せず停止する。特定の業務Excelは入力としない。
 
-CSV列・DBテーブルは維持する。再開した仮指示から発行するJSONスナップショットには任意の`source_draft`を追加する。元番号・元データ識別・元発行日時・現在データ識別・変更された入力区分・倉庫商品別の数量／到着日／ロットの比較を記録する。この項目のない既存履歴も再開・再出力できる。
+## 履歴・出力
 
-再開対象は同じ出荷日の最新仮改訂に限定する。商品・倉庫のキーが変わった場合や、再開原本のハッシュが一致しない場合は停止する。朝CSVの欠損を前日の原本で補わず、一式を再検証する。再開・照合・発行はそれぞれイベントへ記録し、元の発行スナップショットは書き換えない。
+v2発行payloadはworkflow=2とmeaning=replenishment_instruction_not_shipment_actualを保持。元CSV・正規化ハッシュ・型付きデータ・日時・設定・需要予測・自動量・修正理由・最終量・警告・改訂を保存する。旧DBのテーブルは変えず、旧原本/帳票を保持する。旧v0契約はlegacy-data-contract-v0.mdを参照。
 
-## 第7段階の構造化診断
+読取中の更新検査は引き続き一覧/属性/バイト列の前後比較を行う。新方式で使わない旧ファイルは監視対象外。原子的取得や同一業務バッチは保証しない。正式発行では保存原本を再読し全検証する。入力が更新されたら担当者が再取込する。
 
-通常取込と診断は同じCSV検証を使用する。1行の全項目を確認し、不備にファイル・物理終端行・商品・倉庫・対象日／基準日時・ロット・項目・コード・理由・記録値・検証区分を付ける。不備がある入力はDatasetを生成せず停止する。診断側で値を補正したり、既定の数量・単位・確認済み区分を加えたりしない。
-
-必要予測日の連続欠落は先頭日と終端日でまとめる。日付計算の範囲を超える配送日数・補充期間は対象設定の不備として停止する。正常データの補充数量式とCSV列は変更しない。既存の原文正規化・取込ハッシュも維持する。
-
-実CSV対応は未確認のまま。`csv-mapping-review.md`とJSONひな形はレビュー用で、自動変換設定ではない。診断の範囲・未実施項目は`csv-diagnostics.md`参照。
-
-## 第8段階の受入キット
-
-CSV列・数量・換算は変更しない。同梱架空CSVのみ、DATE/TIMESTAMP項目を指定試験日への同一日数差で移す。実CSVはこの変換の入力にできない。kit.jsonに版・元日付・移動日数・元/生成ハッシュを記録する。
-
-試用DBはtrial-info.jsonで識別し、trial_modeイベントと発行payloadのtrial_only=trueを保存する。既存の業務DBスキーマは変更しない。受入記録は全件not_performed、承認unconfirmedで生成し、自動検証結果とは区別する。
-
-## 第9段階の参考見通し
-
-CSV契約は変更しない。bunsen-reference-outlook/version=1のJSONは派生参考出力で、取込・発行データとして受け付けない。基準日・作成日時・元データ識別・在庫/輸送中/予測基準・日別P残高・確認不能理由を保存する。未取得の数値はnullで、明示0と区別する。formal_issue_allowedとplanned_replenishment_includedは常にfalse。日別の既知の予測・輸送中明細は残高が確認不能でも個別に表示する。
-
-## 第10段階の読取中変更検査
-
-診断JSON version=1へread_consistencyを追加する。method、status、atomic_snapshot=false、changed_files、unverified_filesを保持する。INPUT_CHANGED/INPUT_RECHECK_FAILEDは入力契約区分の不備。CSV列と既存取込ハッシュ・DB形式は維持する。以前の診断JSONに追加項目がない場合、HTML再生成では未実施として扱う。形式と検出限界は`csv-read-guard.md`参照。
+CSVの項目対応表は新方式の全項目を未確認で生成する。実列名・単位・換算・確認者を推測で埋めない。

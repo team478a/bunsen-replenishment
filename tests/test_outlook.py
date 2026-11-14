@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 from bunsen.core import DataError, load
 from bunsen.outlook import build_outlook, export_outlook, report_html
-from bunsen.ui import App
+from bunsen.ui import LegacyApp as App
 from test_workflow import NOW, DAY, ROOT
 
 

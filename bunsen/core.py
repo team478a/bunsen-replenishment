@@ -25,6 +25,16 @@ KEYS = {'products': ('product',), 'warehouses': ('warehouse',),
         'policies': ('warehouse', 'product'), 'inventory': ('warehouse', 'product'),
         'forecast': ('warehouse', 'product', 'date'), 'transit': ('shipment_id',),
         'vehicles': ('warehouse', 'product'), 'dry_stock': ('product', 'lot')}
+V2_SCHEMA = {
+    'products': 'product,name,p_per_ball,balls_per_case,cases_per_pl,ship_unit,confirmed',
+    'inventory': 'warehouse,product,quantity_p,as_of,basis,confirmed',
+    'forecast': SCHEMA['forecast'] + ',status',
+    'transit': SCHEMA['transit'],
+    'replenishment': 'warehouse,product,cycle_days,lead_days,safety_days,coverage_days,transit_checked_at,confirmed',
+}
+KEYS['replenishment'] = ('warehouse', 'product')
+NUMBERS.update({'cycle_days', 'safety_days'})
+POSITIVE.add('cycle_days')
 
 
 @dataclass(frozen=True)
@@ -66,6 +76,7 @@ class Dataset:
     raw: dict
     digest: str
     locations: dict = field(default_factory=dict)
+    workflow: int = 0
 
 
 def now_jst():
@@ -79,13 +90,13 @@ def stamp(value):
     return result.astimezone(JST)
 
 
-def inspect_folder(folder, now=None):
+def inspect_folder(folder, now=None, *, workflow=None):
     from .ingest import inspect_folder as inspect
-    return inspect(folder, now or now_jst())
+    return inspect(folder, now or now_jst(),workflow=workflow)
 
 
-def load(folder, now=None):
-    inspection = inspect_folder(folder, now)
+def load(folder, now=None, *, workflow=None):
+    inspection = inspect_folder(folder, now,workflow=workflow)
     if inspection.issues:
         raise DataError(inspection.issues)
     return inspection.dataset
@@ -135,7 +146,10 @@ def allocation_label(line):
     return summary
 
 
-def calculate(data, dispatch):
+def calculate(data, dispatch, *, allow_provisional=False):
+    if data.workflow == 2:
+        from .replenishment import calculate as calculate_v2
+        return calculate_v2(data, dispatch, allow_provisional=allow_provisional)
     t, lines, errors = data.tables, [], []
     products = {r['product']: r for r in t['products']}
     for inv in t['inventory']:
@@ -265,6 +279,9 @@ def morning_stock_issues(data, dispatch, now=None):
 
 def validate(data, lines, dispatch, now=None):
     """Recompute all safety checks; never rely on previous UI confirmations."""
+    if data.workflow == 2:
+        from .replenishment import validate as validate_v2
+        return validate_v2(data, lines, dispatch, now)
     errors = [str(issue) for issue in morning_stock_issues(data, dispatch, now)]
     expected = calculate(data, dispatch)
     expected_keys = {(r['warehouse'], r['product']) for r in expected}

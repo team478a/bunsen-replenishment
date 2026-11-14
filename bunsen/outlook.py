@@ -24,6 +24,8 @@ def period(offset):
 
 
 def build_outlook(data, start, now=None):
+    if data.workflow == 2:
+        raise DataError(['新方式は分析結果の日別根拠を使用してください。旧14日参考見通しは旧入力専用です'])
     try:
         end = start + timedelta(days=14)
     except OverflowError as exc:

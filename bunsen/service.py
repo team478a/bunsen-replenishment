@@ -5,6 +5,8 @@ import html
 import json
 import sqlite3
 import tempfile
+import csv
+import io
 from datetime import date
 from pathlib import Path
 
@@ -68,21 +70,61 @@ class Service:
             self.db.execute('INSERT INTO events(at,kind,payload) VALUES(?,?,?)',
                             (self.clock().isoformat(), kind, encode(payload)))
 
-    def import_folder(self, folder):
+    def import_folder(self, folder, *, workflow=None):
         self.ensure_writable()
         try:
-            data = load(folder, self.clock())
+            if workflow == 2 and not (Path(folder)/'replenishment.csv').is_file():
+                raise DataError(['replenishment.csv: 新方式の補充条件CSVが必要です。旧入力は履歴用です'])
+            data = load(folder, self.clock(),workflow=workflow)
+            if workflow is not None and data.workflow != workflow:
+                raise DataError(['指定した業務方式とCSV形式が一致しません'])
         except DataError as exc:
             self.event('import_failed', {'errors': exc.errors})
             raise
         self.event('import', {'digest': data.digest, 'raw': data.raw})
         return data
 
-    def calculate(self, data, dispatch):
+    def calculate(self, data, dispatch, *, allow_provisional=False):
         self.ensure_writable()
-        lines = calculate(data, dispatch)
+        lines = calculate(data, dispatch, allow_provisional=allow_provisional)
         self.event('calculate', {'digest': data.digest, 'dispatch': dispatch.isoformat(), 'lines': lines})
         return lines
+
+    def edit_quantity(self, data, lines, key, quantity, reason, operator):
+        self.ensure_writable()
+        if data.workflow != 2 or type(quantity) is not int or quantity < 0 or not reason.strip() or not operator.strip():
+            raise DataError(['修正には新方式データ・0以上の整数数量・修正理由・担当者が必要です'])
+        row = next((r for r in lines if (r['warehouse'],r['product']) == key), None)
+        if row is None:
+            raise DataError(['修正対象がありません'])
+        if quantity % row['unit_p']:
+            raise DataError(['指示数量は商品マスタの甲単位にしてください（自動補正しません）'])
+        before = copy.deepcopy(row)
+        after = dict(row,quantity_p=quantity,edit_reason=reason.strip())
+        self.event('edit',dict(digest=data.digest,before=before,after=after,operator=operator.strip(),reason=reason.strip()))
+        row.update(after)
+
+    def update_settings(self, data, key, values, reason, operator):
+        self.ensure_writable()
+        allowed = {'cycle_days','lead_days','safety_days','coverage_days'}
+        if data.workflow != 2 or set(values) != allowed or not reason.strip() or not operator.strip():
+            raise DataError(['設定変更には4設定・変更理由・確認担当者が必要です'])
+        if any(type(v) is not int or v < 0 for v in values.values()):
+            raise DataError(['設定値は0以上の整数です。サイクル・対象日数は正整数です'])
+        rows = copy.deepcopy(data.tables['replenishment'])
+        row = next((r for r in rows if (r['warehouse'],r['product']) == key),None)
+        if row is None:
+            raise DataError(['設定対象がありません'])
+        before = dict(row)
+        row.update(values)
+        stream = io.StringIO(newline='')
+        writer = csv.DictWriter(stream,fieldnames=list(row),lineterminator='\n')
+        writer.writeheader(); writer.writerows(rows)
+        raw = dict(data.raw,**{'replenishment.csv':stream.getvalue()})
+        fresh = self.snapshot_data(raw)
+        self.event('settings_change',dict(before=before,after=row,reason=reason.strip(),operator=operator.strip(),
+                                         before_digest=data.digest,digest=fresh.digest,raw=fresh.raw))
+        return fresh
 
     def latest_revision(self, dispatch, formal=True):
         return self.db.execute('SELECT COALESCE(MAX(revision),0) FROM issues WHERE dispatch=? AND formal=?',
@@ -138,12 +180,17 @@ class Service:
         self.ensure_writable()
         # Reparse all typed values and recompute evidence, never reuse saved checks.
         fresh = self.snapshot_data(data.raw, data.digest)
-        canonical = overlay(calculate(fresh, dispatch), lines)
+        if fresh.workflow == 2:
+            from .replenishment import overlay as overlay_v2
+            provisional = any(r.get('allow_provisional',False) for r in lines)
+            canonical = overlay_v2(calculate(fresh, dispatch, allow_provisional=provisional), lines)
+        else:
+            canonical = overlay(calculate(fresh, dispatch), lines)
         source = self.draft(draft_number, dispatch) if draft_number else None
         reference = compare(source, fresh, canonical) if source else None
         errors = validate(fresh, canonical, dispatch, self.clock())
         if formal and (not operator.strip() or not acknowledged):
-            errors.append('担当者名と実ロット・期限・積載の再確認操作が必要')
+            errors.append('担当者名と補充数量・予測区分の確認操作が必要' if fresh.workflow == 2 else '担当者名と実ロット・期限・積載の再確認操作が必要')
         if formal and errors:
             self.event('issue_blocked', {'digest': data.digest, 'lines': canonical, 'errors': errors})
             raise DataError(errors)
@@ -151,6 +198,8 @@ class Service:
         payload = {'digest': fresh.digest, 'raw': fresh.raw, 'tables': fresh.tables,
                    'lines': canonical, 'operator': operator, 'formal': formal,
                    'validation': errors, 'dispatch': dispatch.isoformat(), 'at': at}
+        if fresh.workflow == 2:
+            payload.update(workflow=2,meaning='replenishment_instruction_not_shipment_actual',settings=fresh.tables['replenishment'])
         if reference:
             payload['source_draft'] = reference
         if self.trial_only:
@@ -207,6 +256,9 @@ class Service:
 
 
 def report_html(payload, warehouse):
+    if payload.get('workflow') == 2:
+        from .shipping_output import report_html as v2_report
+        return v2_report(payload,warehouse)
     esc = lambda v: html.escape(str(v), quote=True)
     formal = payload['formal']
     title = '正式出荷指示書' if formal else '仮出荷指示書'

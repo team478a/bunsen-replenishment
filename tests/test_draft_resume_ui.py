@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from bunsen.core import DataError, calculate
-from bunsen.ui import App
+from bunsen.ui import LegacyApp as App
 from test_workflow import DAY, NOW, ROOT
 
 

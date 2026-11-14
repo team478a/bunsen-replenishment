@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 from bunsen import __version__
 from bunsen.core import DataError
 from bunsen.resources import resource_root
-from bunsen.ui import App
+from bunsen.ui import LegacyApp as App
 from scripts import build_windows
 
 ROOT = Path(__file__).resolve().parent.parent

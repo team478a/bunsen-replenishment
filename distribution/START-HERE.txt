@@ -24,3 +24,8 @@ Pythonやpipの追加インストールは不要です。管理者権限は要�
   BunsenTools.exe backup inspect C:\backup\bunsen.zip
 
 署名証明書・発行元・本番配布承認・現場PCでの受入試験は別途必要です。
+
+現行の新規業務はムロオ必要補充方式です。ブンセン在庫・朝照合は不要です。
+取込→分析→結果→判定/確定→出力の順に操作し、倉庫別Excel/PDFを直接生成します。
+samples/replenishmentは架空例です。旧CSVは履歴用で、新規業務には使いません。
+新規試用は BunsenTools.exe acceptance-kit --dispatch YYYY-MM-DD --output 新規フォルダー から作成できます。
