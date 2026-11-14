@@ -33,7 +33,7 @@ def main(output=None):
             except DataError as exc:
                 assert any('未確定' in e for e in exc.errors)
             else:raise AssertionError('Unconfirmed forecast formally issued')
-            print('PASS: ブンセン在庫なし→日別補充→修正理由保存→正式確定→倉庫別Excel/PDF。未確定予測は正式停止。')
+            print('PASS: destination-only replenishment, edit history, formal Excel/PDF; provisional forecast blocked.')
         finally:service.close()
 
 if __name__=='__main__':main()
