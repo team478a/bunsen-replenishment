@@ -127,6 +127,7 @@ def run_smoke(output):
                 os.environ['LOCALAPPDATA'] = previous
         run_v2_smoke(home)
         checks.append('destination_only_v2_ui_excel_pdf')
+        checks.append('delivery_14day_estimated_expiry')
     result = dict(version=__version__, frozen=bool(getattr(sys, 'frozen', False)),
                   executable=Path(sys.executable).name, checks=checks, success=True)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -160,6 +161,15 @@ def run_v2_smoke(home):
         except DataError as exc:
             assert any('未確定' in e for e in exc.errors)
         else:raise AssertionError('V2 provisional forecast was formally issued')
+        from .delivery_output import export_plan
+        current.data=current.service.import_folder(resource_root()/'samples/delivery-plan')
+        current.allow_provisional.set(False);current.compute_delivery()
+        assert current.delivery_report['assumed_manufacture_date']=='2026-11-09'
+        assert all(t['pallets']<=16 for t in current.delivery_report['trips'])
+        current.delivery_ack.set(True);current.confirm_delivery()
+        report=current.service.delivery_plan(current.delivery_report['plan_id'])
+        assert report['formal'] and report['trial_only']
+        assert len(export_plan(report,target/'delivery-reports'))==7
     finally:
         if current is not None:current.close()
         else:root.destroy()

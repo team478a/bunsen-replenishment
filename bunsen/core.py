@@ -35,6 +35,9 @@ V2_SCHEMA = {
 KEYS['replenishment'] = ('warehouse', 'product')
 NUMBERS.update({'cycle_days', 'safety_days'})
 POSITIVE.add('cycle_days')
+EXPIRY_FIELDS = ('expiry_type', 'shelf_life_days')
+NUMBERS.add('shelf_life_days')
+POSITIVE.add('shelf_life_days')
 
 
 @dataclass(frozen=True)

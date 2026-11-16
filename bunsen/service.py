@@ -7,10 +7,11 @@ import sqlite3
 import tempfile
 import csv
 import io
+import uuid
 from datetime import date
 from pathlib import Path
 
-from .core import DataError, LABELS, WAREHOUSES, allocations, calculate, load, now_jst, units, validate
+from .core import DataError, LABELS, WAREHOUSES, allocations, calculate, load, now_jst, units, validate, stamp
 from .planning import compare, comparison_text, overlay
 
 
@@ -129,6 +130,72 @@ class Service:
     def latest_revision(self, dispatch, formal=True):
         return self.db.execute('SELECT COALESCE(MAX(revision),0) FROM issues WHERE dispatch=? AND formal=?',
                                (dispatch.isoformat(), int(formal))).fetchone()[0]
+
+    def update_product_expiry(self, data, product, expiry_type, shelf_life_days, reason, operator):
+        self.ensure_writable()
+        if data.workflow != 2 or expiry_type not in ('best_before','use_by') or type(shelf_life_days) is not int or shelf_life_days <= 0 or not reason.strip() or not operator.strip():
+            raise DataError(['期限マスタには種別・正整数日数・確認理由・担当者が必要です'])
+        reader = csv.DictReader(io.StringIO(data.raw['products.csv']))
+        fields, rows = list(reader.fieldnames), list(reader)
+        for field in ('expiry_type','shelf_life_days'):
+            if field not in fields:fields.insert(fields.index('confirmed'),field)
+        row = next((r for r in rows if r['product']==product),None)
+        if row is None:raise DataError(['期限マスタの対象商品がありません'])
+        # Other products remain explicitly unknown until reviewed individually.
+        before = dict(row);row.update(expiry_type=expiry_type,shelf_life_days=str(shelf_life_days))
+        stream = io.StringIO(newline='');writer=csv.DictWriter(stream,fieldnames=fields,lineterminator='\n')
+        writer.writeheader();writer.writerows(rows)
+        fresh=self.snapshot_data(dict(data.raw,**{'products.csv':stream.getvalue()}))
+        self.event('product_expiry_change',dict(product=product,before=before,after=row,reason=reason.strip(),operator=operator.strip(),
+                                                before_digest=data.digest,digest=fresh.digest,raw=fresh.raw))
+        return fresh
+
+    def calculate_delivery_plan(self, data, start, *, allow_provisional=False):
+        from .delivery import build_plan
+        self.ensure_writable()
+        fresh=self.snapshot_data(data.raw,data.digest)
+        report=build_plan(fresh,start,self.clock(),allow_provisional=allow_provisional)
+        report.update(plan_id='DP-'+uuid.uuid4().hex,trial_only=self.trial_only)
+        self.event('delivery_plan',dict(report=report,raw=fresh.raw))
+        return report
+
+    def delivery_plan(self, plan_id):
+        for kind,content in self.db.execute("SELECT kind,payload FROM events WHERE kind IN ('delivery_plan','delivery_plan_confirmed') ORDER BY id DESC"):
+            saved=json.loads(content)
+            if saved['report']['plan_id']==plan_id:
+                report=saved['report']
+                report['restored_view']=self.read_only
+                return report
+        raise DataError(['配送計画が見つかりません'])
+
+    def delivery_plans(self):
+        return [json.loads(r[0])['report'] for r in self.db.execute("SELECT payload FROM events WHERE kind='delivery_plan' ORDER BY id DESC LIMIT 100")]
+
+    def confirm_delivery_plan(self, plan_id, operator, acknowledged=False):
+        from .delivery import build_plan
+        self.ensure_writable()
+        if not operator.strip() or acknowledged is not True:
+            raise DataError(['正式配送予定には担当者と明示確認が必要です'])
+        # Serialize confirmations from concurrent application instances.
+        with self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            if self.delivery_plan(plan_id)['formal']:
+                raise DataError(['この配送予定は確定済みです'])
+            saved=next((json.loads(r[0]) for r in self.db.execute("SELECT payload FROM events WHERE kind='delivery_plan'")
+                        if json.loads(r[0])['report']['plan_id']==plan_id),None)
+            if saved is None:raise DataError(['配送計画の原本がありません'])
+            report=saved['report']
+            if date.fromisoformat(report['start']) < stamp(self.clock().isoformat()).date():
+                raise DataError(['過去日を含む配送予定は確定できません。新たに計算してください'])
+            fresh=self.snapshot_data(saved['raw'],report['digest'])
+            verified=build_plan(fresh,date.fromisoformat(report['start']),stamp(report['calculated_at']),allow_provisional=report['allow_provisional'])
+            for key,value in verified.items():
+                if report.get(key)!=value:raise DataError(['保存計画と原本再計算が一致しません'])
+            if not verified['forecast_confirmed']:raise DataError(['未確定予測を使用した配送予定は正式確定できません'])
+            report.update(formal=True,operator=operator.strip(),confirmed_at=self.clock().isoformat())
+            self.db.execute('INSERT INTO events(at,kind,payload) VALUES(?,?,?)',
+                            (self.clock().isoformat(),'delivery_plan_confirmed',encode(dict(report=report,raw=saved['raw']))))
+        return report
 
     def snapshot_data(self, raw, digest=None):
         with tempfile.TemporaryDirectory() as folder:
