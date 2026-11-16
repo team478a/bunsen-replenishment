@@ -25,9 +25,9 @@ LIMITATIONS = [
 ]
 
 
-def diagnose(folder, dispatch, now=None, *, workflow=None):
+def diagnose(folder, dispatch, now=None, *, workflow=None, product_csv=None, product_master_revision=None):
     now = now or now_jst()
-    inspection = inspect_folder(folder, now,workflow=workflow)
+    inspection = inspect_folder(folder, now,workflow=workflow,product_csv=product_csv)
     issues = list(inspection.issues)
     skipped = list(inspection.skipped_checks)
     v2 = any(f['filename']=='replenishment.csv' for f in inspection.files)
@@ -52,7 +52,7 @@ def diagnose(folder, dispatch, now=None, *, workflow=None):
         skipped.append('新方式ではブンセン在庫・朝照合は対象外です' if v2 else '朝現物在庫条件チェック（入力不備のため未実施）')
     files = inspection.files
     fingerprint = hashlib.sha256(json.dumps([(f['filename'], f['exists'], f['sha256']) for f in files], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
-    return dict(format='bunsen-csv-diagnostic', version=1, schema='v2-provisional-contract' if v2 else 'v0-provisional',
+    report=dict(format='bunsen-csv-diagnostic', version=1, schema='v2-provisional-contract' if v2 else 'v0-provisional',
                 checked_at=now.isoformat(), input_folder=str(Path(folder).resolve()),
                 dispatch=dispatch.isoformat(), input_fingerprint=fingerprint,
                 dataset_digest=inspection.dataset.digest if inspection.dataset else None,
@@ -64,6 +64,8 @@ def diagnose(folder, dispatch, now=None, *, workflow=None):
                 status='issues_found' if issues else 'no_detected_input_issues',
                 issues=[asdict(issue) for issue in issues], files=files,
                 warnings=warnings, skipped_checks=skipped, limitations=[v for v in LIMITATIONS if not v2 or '現物' not in v])
+    if product_csv is not None:report['product_master_revision']=product_master_revision
+    return report
 
 
 def target_rule(field):
@@ -112,7 +114,8 @@ def report_html(report):
         rows.append('<tr>' + ''.join(f'<td>{esc(value)}</td>' for value in values) + '</tr>')
     inventory = []
     for info in report['files']:
-        values = [info['filename'], STATUS_LABELS[info['status']], info['rows'] if info['rows'] is not None else '未取得',
+        source=f'（登録商品マスタ版{report.get("product_master_revision")}）' if info.get('source')=='registered_product_master' else ''
+        values = [info['filename']+source, STATUS_LABELS[info['status']], info['rows'] if info['rows'] is not None else '未取得',
                   ', '.join(info['headers']) if info['headers'] is not None else '未取得', info['sha256'] or '未取得',
                   json.dumps(info['basis_times'], ensure_ascii=False)]
         inventory.append('<tr>' + ''.join(f'<td>{esc(value)}</td>' for value in values) + '</tr>')

@@ -263,7 +263,8 @@ class LegacyApp:
         if not self.diagnostic_folder.get():
             raise DataError(['診断フォルダーを選択してください'])
         dispatch = date.fromisoformat(self.diagnostic_day.get())
-        report = diagnose(self.diagnostic_folder.get(), dispatch, self.service.clock(),workflow=getattr(self,'diagnostic_workflow',None))
+        master_options=getattr(self,'diagnostic_product_master',lambda:{})()
+        report = diagnose(self.diagnostic_folder.get(), dispatch, self.service.clock(),workflow=getattr(self,'diagnostic_workflow',None),**master_options)
         self.diagnostic_report = report
         for i, issue in enumerate(report['issues']):
             display = dict(issue, phase=PHASE_LABELS[issue['phase']])
@@ -275,6 +276,7 @@ class LegacyApp:
                    f'仮契約適合: {"適合" if report["contract_compatible"] else "不適合"}／計算条件: {"確認可" if report["calculation_possible"] else "不備あり・未実施"}',
                    *report['skipped_checks'], *report['limitations']]
         details.extend(f'{info["filename"]}: {STATUS_LABELS[info["status"]]}／列={info["headers"]}／原本SHA-256={info["sha256"] or "未取得"}' for info in report['files'])
+        if report.get('product_master_revision') is not None:details.insert(0,f'登録商品マスタ版 {report["product_master_revision"]}を使用（物理products.csvは不使用）')
         self.diagnostic_details.configure(state='normal')
         self.diagnostic_details.insert('1.0', '\n'.join(details))
         self.diagnostic_details.configure(state='disabled')

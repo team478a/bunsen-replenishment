@@ -14,6 +14,8 @@ HEADERS = ['商品','品名','現在庫P','対象予測P','安全P(最大)','必
 
 def notice(payload):
     parts = ['必要補充数量の指示です。実出荷実績・ブンセンの供給可能在庫を示しません。']
+    if payload.get('product_master_revision') is not None:
+        parts.append(f'登録商品マスタ版 {payload["product_master_revision"]}（発行時の保存原本）。')
     if payload.get('trial_only'):
         parts.append('架空データの試用帳票 - 実出荷に使用しない。')
     if payload.get('restored_view'):

@@ -129,6 +129,7 @@ def run_smoke(output):
         checks.append('destination_only_v2_ui_excel_pdf')
         checks.append('delivery_14day_estimated_expiry')
         checks.append('many_product_print_readiness')
+        checks.append('product_master_registration')
     result = dict(version=__version__, frozen=bool(getattr(sys, 'frozen', False)),
                   executable=Path(sys.executable).name, checks=checks, success=True)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -189,6 +190,21 @@ def run_v2_smoke(home):
         assert len(export_plan(report,target/'many-delivery-reports'))==7
         record=json.loads((kit/'acceptance-record.json').read_text(encoding='utf-8'))
         assert record['overall_status']=='not_performed' and all(c['status']=='not_performed' and c['expected'] for c in record['cases'])
+        current.new_master()
+        values=dict(product='P001',name='架空画面登録そうめん',p_per_ball='12',balls_per_case='2',cases_per_pl='10',
+                    ship_unit='PL',expiry_type='賞味期限',shelf_life_days='10')
+        for key,value in values.items():current.master_values[key].set(value)
+        current.master_operator.set('架空確認者');current.master_reason.set('架空の登録試験');current.master_ack.set(True);current.save_master()
+        state=current.service.product_master()
+        assert state['products'][0]['name']=='架空画面登録そうめん' and not current.master_ack.get()
+        current.use_registered_master.set(True)
+        current.data=current.service.import_folder(resource_root()/'samples/delivery-plan',workflow=2,use_registered_products=True)
+        current.compute();current.ack.set(True);current.issue(True)
+        payload=current.service.report_payload(current.last_number)
+        assert payload['product_master_revision']==state['revision']
+        assert payload['tables']['products'][0]['name']=='架空画面登録そうめん'
+        assert len(write_documents(payload,target/'master-reports'))==6
+        current.service.export_product_master(target/'registered-products.csv')
     finally:
         if current is not None:current.close()
         else:root.destroy()

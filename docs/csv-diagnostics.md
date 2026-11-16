@@ -16,3 +16,6 @@ python -m bunsen.tools mapping-template --output C:\review\mapping.json
 配布版はBunsenTools.exe。終了コードは0=対象範囲の不備なし、2=不備あり、1=保存等の失敗（引数不正はargparseの2）。新方式CSVが必要。過去の診断を数量/入力変更後の確認として使い回さない。原子的取得・同一業務バッチ・入力の真正性は保証しない。
 
 旧方式の診断APIは保存原本/互換性確認用に残す。現行契約は[data-contract.md](data-contract.md)、変更検査は[csv-read-guard.md](csv-read-guard.md)、旧資料はlegacy-csv-diagnostics-v0.mdを参照。
+## 画面登録の商品マスタを使う場合
+
+日常操作の「登録商品マスタを使う」が選択されている場合、画面の取込前診断も同じ登録マスタの版/原本を使用し、products.csvなしの4CSVを診断できる。結果には使用版を表示する。未選択とCLI診断は従来CSV方式。診断は読取専用で、マスタ変更・正式発行は行わない。使用元や登録マスタ変更後は再診断する。

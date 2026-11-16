@@ -29,7 +29,7 @@ class Inspection:
     read_consistency: dict = field(default_factory=unchecked)
 
 
-def inspect_folder(folder, now, *, workflow=None):
+def inspect_folder(folder, now, *, workflow=None, product_csv=None):
     folder = Path(folder)
     issues, files, skipped, raw, locations = [], [], [], {}, {}
     tables = {name: [] for name in SCHEMA}
@@ -38,6 +38,10 @@ def inspect_folder(folder, now, *, workflow=None):
     v2 = workflow == 2 or (folder / 'replenishment.csv').exists()
     schema = V2_SCHEMA if v2 else SCHEMA
     ignored = {'dry_stock.csv', 'vehicles.csv', 'warehouses.csv', 'policies.csv'} if v2 else set()
+    if product_csv is not None:
+        if not v2 or not isinstance(product_csv,str):
+            raise ValueError('登録商品マスタは新方式のCSV文字列で指定してください')
+        ignored.add('products.csv')
     tables = {name: [] for name in schema}
     records = {name: [] for name in schema}
 
@@ -59,11 +63,13 @@ def inspect_folder(folder, now, *, workflow=None):
     sources = [(name, folder / (name + '.csv'), columns) for name, columns in schema.items()]
     sources.extend((path.stem, path, None) for path in unknown)
     for name, path, expected in sources:
+        registered_product = name == 'products' and product_csv is not None
         info = dict(filename=path.name, exists=path.exists(), expected=expected is not None,
                     optional=expected is not None and name == 'dry_stock', headers=None, rows=None, sha256=None,
                     bytes=None, status='missing', basis_times={})
         files.append(info)
-        if not path.exists():
+        if registered_product:info.update(exists=True,source='registered_product_master')
+        if not path.exists() and not registered_product:
             if name != 'dry_stock':
                 issue(name, None, 'FILE_MISSING', '必須ファイル欠損')
             continue
@@ -71,8 +77,8 @@ def inspect_folder(folder, now, *, workflow=None):
             issues.append(ValidationIssue(path.name, None, 'UNSUPPORTED_FILE', '未対応CSV。仮データ契約外のため取込停止'))
         reader = None
         try:
-            binary = path.read_bytes()
-            guard.remember(path, binary)
+            binary = product_csv.encode('utf-8') if registered_product else path.read_bytes()
+            if not registered_product:guard.remember(path, binary)
             info.update(bytes=len(binary), sha256=hashlib.sha256(binary).hexdigest())
             # Match the previous read_text(newline=None) normalization for digests.
             content = binary.decode('utf-8-sig').replace('\r\n', '\n').replace('\r', '\n')

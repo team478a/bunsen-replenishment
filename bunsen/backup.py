@@ -87,13 +87,29 @@ def validate_database(db):
             raise DataError(['改訂履歴に欠落・重複があります'])
         issue_events = set()
         events = 0
-        for _, at, kind, content in db.execute('SELECT * FROM events ORDER BY id'):
+        catalog_revision,catalog_products=0,{}
+        for event_id, at, kind, content in db.execute('SELECT * FROM events ORDER BY id'):
             stamp(at)
             payload = json.loads(content)
             if not isinstance(payload, dict) or not isinstance(kind, str) or not kind:
                 raise DataError(['操作イベントの形式が不正'])
             if kind == 'import' and raw_digest(payload.get('raw')) != payload.get('digest'):
                 raise DataError(['取込イベントの原本ハッシュが不一致'])
+            if kind == 'product_master_change':
+                from .catalog import validate_product
+                products=payload.get('products')
+                if not isinstance(products,list) or not products or any(not isinstance(p,dict) for p in products):
+                    raise DataError(['登録商品マスタの形式が不正'])
+                checked=[validate_product({k:v for k,v in p.items() if k!='confirmed'}) for p in products]
+                current={p['product']:p for p in checked}
+                after=payload.get('after');before=payload.get('before')
+                if (checked!=products or len(current)!=len(products) or not isinstance(after,dict)
+                    or payload.get('base_revision')!=catalog_revision or payload.get('acknowledged') is not True or not isinstance(payload.get('reason'),str) or not payload['reason'].strip()
+                    or not isinstance(payload.get('operator'),str) or not payload['operator'].strip()
+                    or current.get(after.get('product'))!=after or catalog_products.get(after.get('product'))!=before
+                    or current!={**catalog_products,after['product']:after}):
+                    raise DataError(['登録商品マスタの変更履歴が不整合'])
+                catalog_revision,catalog_products=event_id,current
             if kind == 'issue':
                 number = payload.get('number')
                 if number in issue_events or issues.get(number) != payload:
