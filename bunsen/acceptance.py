@@ -12,6 +12,22 @@ from .resources import resource_root
 
 SOURCE_DAY = date(2026, 11, 9)
 SCENARIOS = ('before_morning', 'morning', 'multi_lot')
+V2_SCENARIOS = ('replenishment', 'replenishment-provisional', 'delivery-plan', 'report-many-products')
+V2_CASES = (
+    ('environment','端末・起動・試用隔離','指定試験日・版・Windows・表示倍率を記録。trial-dataを使用し試用表示がある。通常DBを変更しない。'),
+    ('import','ムロオ在庫・既存予測・補充条件取込','samples/replenishment。神戸120P・杉戸48Pを分析。ブンセン在庫・朝照合は不要。'),
+    ('calculate','倉庫別の日別計算と甲切上げ','現在庫・需要予測・確定入庫・安全在庫・必要P・換算後P・PL＋甲・基準日時を確認。'),
+    ('edit','数量・理由・担当者の修正履歴','神戸144Pへ修正し理由と担当者を保存。元計算120Pと区別し、変更後の確認が解除される。'),
+    ('provisional','未確定予測の正式確定停止','samples/replenishment-provisional。明示選択時だけ参考計算でき、確認チェック後も正式確定は停止。'),
+    ('output','倉庫別Excel/PDF・実プリンター','神戸・杉戸別の数量/単位/日付/担当者/試用表示を照合。端末・アプリ版・用紙・倍率・改ページ・紙/PDFの証拠を記録。'),
+    ('delivery','14日計画と計算日固定の概算期限','samples/delivery-plan。計算日＋10日が概算期限。将来配送日や再起動で仮製造日を更新しない。実期限/廃棄量の表示ではない。'),
+    ('delivery_confirm','正式配送予定の確認ゲート','担当者・明示チェックなしは停止。条件変更で確認解除。保存原本から再計算し、再起動後も同じ計算日時・期限で確認できる。'),
+    ('many_products','多品目・長い商品名・16PL分便','samples/report-many-productsは8商品。初回は商品ごと神戸432P/杉戸216P（合計3456P/1728P）。商品別PL換算・甲端数枠を数え、神戸の初回配送は19枠で2便（16+3）。'),
+    ('many_print','多ページの帳票照合','全8商品・全明細・日別推移・長い品名/理由を照合。PDFの各ページに表見出し/試用注意があり、概算期限/残日数/負数が読める。Excelの全文・行高・印刷プレビューも確認。'),
+    ('history','履歴とバックアップ閲覧専用','通常指示と配送計画を再表示。別フォルダーへ復元し、閲覧専用・試用注意を保持。新規確定不可。'),
+    ('mapping','実CSVの対応確認（業務側）','列・コード・単位・在庫基準時刻・確定入庫の網羅/重複・予測への注文包含・更新頻度/確認責任者を記録。未確認を補完しない。'),
+    ('business','正式値と運用承認（業務側）','単位/期限/補充設定、配送枠/端数積付、修正承認、バックアップ保管/復旧/配布更新を責任者が確認。未確認は運用開始を保留。'),
+)
 CASES = (
     ('environment', '現場端末・起動', '版・端末・Windows・起動と日本語表示を確認'),
     ('draft', '前日仮指示', 'before_morningを取込、神戸・杉戸各240Pの仮指示を保存'),
@@ -33,7 +49,7 @@ def _digest(content):
 
 def _csv_paths(workflow=0):
     if workflow == 2:
-        return [f'samples/{scenario}/{name}.csv' for scenario in ('replenishment','replenishment-provisional') for name in V2_SCHEMA]
+        return [f'samples/{scenario}/{name}.csv' for scenario in V2_SCENARIOS for name in V2_SCHEMA]
     return [f'samples/{scenario}/{name}.csv' for scenario in SCENARIOS for name in SCHEMA
             if name != 'dry_stock' or scenario != 'before_morning']
 
@@ -50,7 +66,10 @@ def create_kit(output, dispatch, now=None, *, workflow=0):
             original = (resource_root() / relative).read_bytes()
             sources[relative] = _digest(original)
             reader = csv.DictReader(io.StringIO(original.decode('utf-8-sig')))
-            if reader.fieldnames != (V2_SCHEMA if workflow==2 else SCHEMA)[Path(relative).stem].split(','):
+            expected=(V2_SCHEMA if workflow==2 else SCHEMA)[Path(relative).stem].split(',')
+            if workflow==2 and Path(relative).stem=='products' and Path(relative).parent.name in ('delivery-plan','report-many-products'):
+                expected=expected[:-1]+['expiry_type','shelf_life_days']+expected[-1:]
+            if reader.fieldnames != expected:
                 raise DataError(['同梱サンプルの列が仮契約と一致しません'])
             stream = io.StringIO(newline='')
             writer = csv.DictWriter(stream, fieldnames=reader.fieldnames, lineterminator='\n')
@@ -81,9 +100,11 @@ def create_kit(output, dispatch, now=None, *, workflow=0):
                          for key, title, expected in CASES])
     contents['acceptance-record.json'] = json.dumps(record, ensure_ascii=False, indent=2).encode('utf-8')
     if workflow==2:
-        record['cases']=[dict(id=key,title=label,status='not_performed',actual=None,evidence=None,operator=None,performed_at=None) for key,label in [('import','ムロオ在庫・既存予測・補充条件取込'),('calculate','倉庫別の日別計算と甲切上げ'),('edit','数量・理由・担当者の修正履歴'),('provisional','未確定予測の正式確定停止'),('output','神戸・杉戸別Excel/PDFと日本語表示'),('history','旧履歴保持とバックアップ閲覧専用')]]
+        record['cases']=[dict(id=key,title=label,expected=expected,status='not_performed',actual=None,evidence=None,operator=None,performed_at=None) for key,label,expected in V2_CASES]
         contents['acceptance-record.json']=json.dumps(record,ensure_ascii=False,indent=2).encode('utf-8')
     contents['GUIDE.md'] = (_guide_v2(dispatch) if workflow==2 else _guide(dispatch)).encode('utf-8')
+    if workflow==2:
+        contents['OPERATIONAL-READINESS.md']=(resource_root()/'docs/operational-readiness.md').read_bytes()
     contents['kit.json'] = json.dumps(manifest, ensure_ascii=False, indent=2).encode('utf-8')
     # Reserve a new directory exclusively. On failure remove only paths we created.
     output.mkdir(parents=True, exist_ok=False)
@@ -196,10 +217,16 @@ def _guide_v2(dispatch):
 4. 出力ボタンで神戸・杉戸別のExcel/PDF/HTMLを新しい保存先へ出力し、日本語・数量・ページ割りを確認します。
 5. samples/replenishment-provisionalは明示選択で参考分析できますが正式確定は停止します。
 6. 管理画面の設定変更は根拠・担当者確認を記録します。変更後は再分析・再確認します。
+7. samples/delivery-planを取込し「14日配送計画」で計画を計算・保存します。計算日＋10日の概算期限と、出荷/入荷残日数を確認します。試験日と計算実行日が同じ場合は概算期限が{dispatch+timedelta(days=10)}です。将来の配送日を仮製造日にしません。
+8. 担当者と計画用確認チェックがないと正式配送予定へ確定できません。保存履歴を選び、同じ計算日時で再表示/確定/出力できることを確認します。
+9. samples/report-many-productsを取込します。8商品の長い架空品名と商品別PL換算を確認します。初回は各商品で神戸432P/杉戸216P、倉庫合計3456P/1728Pです。神戸の初回は19PL枠で16枠+3枠の2便です。甲端数も1枠を占有し、異なる商品を同じPLへ積みません。
+10. 多品目の指示書と14日計画をExcel/PDFへ出力し、全明細・改ページ・繰返し見出し・試用/参考/概算注意・長い品名を確認します。数量修正では長い架空理由も試します。Excelで行高上限を超える長文は対象セルを示して停止し、内容を切り捨てません。
+11. 紙のプリンター名・用紙・倍率・Excel/PDF表示アプリ・版・証拠ファイル先を記録します。読めない文字・欠け・不一致は不合格として残し、現場結果を自動テスト結果で代用しません。
 
 サンプルのムロオ在庫は試験日07時の宣言です。それ以前は未来データとして停止します。
 これは朝のブンセン在庫確認条件ではありません。時計や検証を変更しないでください。
 試験日や版が異なる場合は新規キットを生成してください。設定値は架空例で業務承認済みではありません。
 受入記録は全件未実施・承認未確認です。人が確認した結果だけを記入します。
+acceptance-record.jsonのexpectedと実際の数量/表示を比較し、status/actual/evidence/operator/performed_atを記入してください。実CSV・正式値・運用承認は同梱OPERATIONAL-READINESS.mdの項目で別途確認します。
 必要補充数量は実出荷実績や供給可能在庫の保証ではありません。
 '''

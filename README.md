@@ -69,3 +69,9 @@ python -m bunsen.demo
 Excel出力は標準OOXMLを直接生成し、特定テンプレートや外部サービスに依存しません。日本語PDFは同梱するReportLabを使用します。[公式フォント仕様](https://docs.reportlab.com/reportlab/userguide/ch3_fonts/)に沿った日本語CIDフォントを利用します。ライブラリは固定版を配布ZIPへ同梱し、利用端末でpipを必要としません。
 
 詳細：[現行仕様](docs/specification.md)、[仮CSV契約](docs/data-contract.md)、[改修調査・計画](docs/replenishment-v2-plan.md)、[未確定事項](docs/open-questions.md)、[Windows配布](docs/windows-distribution.md)、[バックアップ](docs/backup-restore.md)、[CSV読取中変更検査](docs/csv-read-guard.md)。
+
+## 現場受入の準備
+
+0.3.1-preview.1の受入キットは今日/明日補充・未確定予測・14日計画・8商品の長い品名の4シナリオを含みます。数量/16PL分便の期待結果を付けた13項目の記録と、実CSV・正式設定・実プリンター・復旧/更新の確認票を同梱します。すべて架空で、受入結果は未実施のまま生成します。
+
+長文のExcel行高を調整し、長いPDF行はページに分割します。Excelの印刷行高上限を超える場合は対象セルを表示して停止し、切り捨てません。[試用キット](docs/acceptance-kit.md)・[現場受入手順](docs/acceptance-test.md)・[運用開始前確認票](docs/operational-readiness.md)を使用してください。
