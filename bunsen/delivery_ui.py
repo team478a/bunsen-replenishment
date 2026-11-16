@@ -7,34 +7,37 @@ from tkinter import ttk, filedialog
 from .core import DataError, LABELS, units
 from .delivery import NOTICE
 from .delivery_output import export_plan
+from .ui_theme import section, table_scrollbars, text_panel, responsive_label, scroll_page
 
 
 class DeliveryUI:
     def build_delivery_tab(self):
         self.delivery_report=None
         self.delivery_tab=ttk.Frame(self.tabs,padding=12);self.tabs.add(self.delivery_tab,text='14日配送計画')
-        ttk.Label(self.delivery_tab,text='14日間の配送予定と概算期限',font=('Yu Gothic UI',18,'bold')).pack(anchor='w')
-        ttk.Label(self.delivery_tab,text=NOTICE,wraplength=1080).pack(anchor='w',pady=5)
-        bar=ttk.Frame(self.delivery_tab);bar.pack(fill='x',pady=6)
+        self.delivery_tab=scroll_page(self.delivery_tab)
+        ttk.Label(self.delivery_tab,text='14日間の配送予定と概算期限',style='Title.TLabel',font=('Yu Gothic UI',18,'bold')).pack(anchor='w')
+        responsive_label(self.delivery_tab,text=NOTICE,style='Muted.TLabel').pack(fill='x',pady=5)
+        bar=section(self.delivery_tab,'01  計画の作成')
         ttk.Label(bar,text='計画開始日（日常操作の出荷予定日と共通）').pack(side='left')
         ttk.Entry(bar,textvariable=self.day,width=13).pack(side='left',padx=4)
-        self.write_button(bar,text='14日計画を計算・保存',command=lambda:self.run(self.compute_delivery)).pack(side='left',padx=4)
+        self.write_button(bar,text='14日計画を計算・保存',style='Primary.TButton',command=lambda:self.run(self.compute_delivery)).pack(side='left',padx=4)
         self.delivery_ack=tk.BooleanVar(value=False)
         ttk.Checkbutton(self.delivery_tab,text='計画数量・16PL枠・参考期限・警告を確認した（実期限の保証ではありません）',variable=self.delivery_ack).pack(anchor='w')
-        row=ttk.Frame(self.delivery_tab);row.pack(fill='x',pady=5)
+        row=section(self.delivery_tab,'02  確認・正式確定・出力')
         ttk.Label(row,text='確認担当者（日常操作と共通）').pack(side='left');ttk.Entry(row,textvariable=self.operator,width=16).pack(side='left')
-        self.write_button(row,text='正式配送予定を確定',command=lambda:self.run(self.confirm_delivery)).pack(side='left',padx=5)
+        self.write_button(row,text='正式配送予定を確定',style='Primary.TButton',command=lambda:self.run(self.confirm_delivery)).pack(side='left',padx=5)
         ttk.Button(row,text='選択計画をExcel・PDF出力',command=lambda:self.run(self.export_delivery)).pack(side='left',padx=5)
         cols=('trip','warehouse','dispatch','arrival','product','quantity','pallets','expiry','remaining','units')
-        self.delivery_tree=ttk.Treeview(self.delivery_tab,columns=cols,show='headings',height=6)
+        listing=ttk.Frame(self.delivery_tab);listing.pack(fill='x',pady=8)
+        self.delivery_tree=ttk.Treeview(listing,columns=cols,show='headings',height=6)
         for c,label,width in zip(cols,('便','倉庫','出荷日','入荷日','商品','数量P','PL枠','概算期限','入荷残日','PL＋甲'),(65,110,105,105,150,75,60,105,75,120)):
             self.delivery_tree.heading(c,text=label);self.delivery_tree.column(c,width=width)
-        scroll=ttk.Scrollbar(self.delivery_tab,orient='vertical',command=self.delivery_tree.yview)
-        self.delivery_tree.configure(yscrollcommand=scroll.set);scroll.pack(side='right',fill='y');self.delivery_tree.pack(fill='x')
-        self.delivery_info=tk.Text(self.delivery_tab,height=9,wrap='word');self.delivery_info.pack(fill='both',expand=True,pady=5)
+        table_scrollbars(self.delivery_tree)
+        details=section(self.delivery_tab,'計画の状態・概算期限リスク・計算根拠',expand=True)
+        self.delivery_info=tk.Text(details,height=6,wrap='word');text_panel(self.delivery_info);self.delivery_info.pack(fill='both',expand=True)
         row=ttk.Frame(self.delivery_tab);row.pack(fill='x')
         self.delivery_history=tk.StringVar();self.delivery_picker=ttk.Combobox(row,textvariable=self.delivery_history,state='readonly',width=90)
-        self.delivery_picker.pack(side='left');ttk.Button(row,text='保存計画を表示',command=lambda:self.run(self.load_delivery)).pack(side='left',padx=5)
+        self.delivery_picker.pack(side='left',fill='x',expand=True);ttk.Button(row,text='保存計画を表示',command=lambda:self.run(self.load_delivery)).pack(side='left',padx=5)
         self.operator.trace_add('write',lambda *_:self.delivery_ack.set(False))
         self.refresh_delivery_history()
 
