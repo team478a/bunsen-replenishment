@@ -4,6 +4,7 @@ from tkinter import ttk, filedialog
 
 from .catalog import catalog_csv
 from .core import DataError, case_p
+from .ui_theme import table_scrollbars, section, responsive_label, scroll_page
 
 LABELS={'product':'商品コード','name':'商品名','p_per_ball':'1ボールのP数','balls_per_case':'1甲のボール数',
         'cases_per_pl':'1PLの甲数','ship_unit':'出荷単位','expiry_type':'期限の種別','shelf_life_days':'製造からの期限日数'}
@@ -13,8 +14,9 @@ class CatalogUI:
     def build_product_master_tab(self):
         self.master_revision=None;self.master_service_path=None;self.master_edit_code=None
         self.master_tab=ttk.Frame(self.tabs,padding=12);self.tabs.add(self.master_tab,text='商品マスタ')
-        ttk.Label(self.master_tab,text='商品マスタの登録・編集',font=('Yu Gothic UI',18,'bold')).pack(anchor='w')
-        ttk.Label(self.master_tab,text='CSV未取込でも登録できます。換算と期限は確認済みの値を入力してください。登録は在庫や予測の作成ではありません。',wraplength=1080).pack(anchor='w',pady=5)
+        self.master_tab=scroll_page(self.master_tab)
+        ttk.Label(self.master_tab,text='商品マスタの登録・編集',style='Title.TLabel',font=('Yu Gothic UI',18,'bold')).pack(anchor='w')
+        responsive_label(self.master_tab,text='確認済みの換算・期限を登録します。在庫・需要予測の登録は行いません。',style='Muted.TLabel').pack(fill='x',pady=5)
         bar=ttk.Frame(self.master_tab);bar.pack(fill='x',pady=5)
         ttk.Button(bar,text='新規商品',command=self.new_master).pack(side='left',padx=4)
         ttk.Button(bar,text='最新の登録一覧を再表示',command=lambda:self.refresh_product_master(force=True)).pack(side='left',padx=4)
@@ -23,23 +25,23 @@ class CatalogUI:
         self.master_tree=ttk.Treeview(listing,columns=('product','name','case','pl','unit','expiry'),show='headings',height=5,selectmode='browse')
         for key,label,width in zip(self.master_tree['columns'],('商品コード','商品名','1甲のP','1PLのP','出荷単位','概算期限マスタ'),(125,360,105,105,100,230)):
             self.master_tree.heading(key,text=label);self.master_tree.column(key,width=width)
-        scroll=ttk.Scrollbar(listing,orient='vertical',command=self.master_tree.yview);self.master_tree.configure(yscrollcommand=scroll.set)
-        scroll.pack(side='right',fill='y');self.master_tree.pack(side='left',fill='x',expand=True);self.master_tree.bind('<<TreeviewSelect>>',self.select_master)
+        table_scrollbars(self.master_tree);self.master_tree.bind('<<TreeviewSelect>>',self.select_master)
         source=ttk.Frame(self.master_tab);source.pack(fill='x',pady=6)
         ttk.Label(source,text='取込データから転記（未保存）').pack(side='left')
         self.master_source=tk.StringVar();self.master_source_picker=ttk.Combobox(source,textvariable=self.master_source,state='readonly',width=18)
         self.master_source_picker.pack(side='left',padx=4)
         ttk.Button(source,text='選択商品を入力欄へ転記',command=lambda:self.run(self.copy_imported_master)).pack(side='left')
-        form=ttk.Frame(self.master_tab);form.pack(fill='x',pady=5)
+        form=section(self.master_tab,'商品情報・単位換算・概算期限')
+        form.columnconfigure(1,weight=1);form.columnconfigure(3,weight=1)
         self.master_values={};self.master_code_entry=None
         for index,key in enumerate(('product','name','p_per_ball','balls_per_case','cases_per_pl','ship_unit','expiry_type','shelf_life_days')):
             row,col=divmod(index,2);var=tk.StringVar();self.master_values[key]=var
             ttk.Label(form,text=LABELS[key]).grid(row=row,column=col*2,sticky='w',padx=5,pady=5)
             if key in ('ship_unit','expiry_type'):
                 choices=('PL','甲') if key=='ship_unit' else ('賞味期限','消費期限')
-                widget=ttk.Combobox(form,textvariable=var,values=choices,state='readonly',width=30)
-            else:widget=ttk.Entry(form,textvariable=var,width=40 if key=='name' else 30)
-            widget.grid(row=row,column=col*2+1,sticky='w',padx=5,pady=5)
+                widget=ttk.Combobox(form,textvariable=var,values=choices,state='readonly',width=20)
+            else:widget=ttk.Entry(form,textvariable=var,width=26 if key=='name' else 20)
+            widget.grid(row=row,column=col*2+1,sticky='ew',padx=5,pady=5)
             if key=='product':self.master_code_entry=widget
             var.trace_add('write',self.master_form_changed)
         self.master_units=tk.StringVar(value='換算未確認');ttk.Label(self.master_tab,textvariable=self.master_units).pack(anchor='w',pady=5)
@@ -49,7 +51,7 @@ class CatalogUI:
         ttk.Label(author,text='登録・変更理由').pack(side='left');ttk.Entry(author,textvariable=self.master_reason,width=52).pack(side='left',padx=4)
         self.master_operator.trace_add('write',self.master_form_changed);self.master_reason.trace_add('write',self.master_form_changed)
         ttk.Checkbutton(self.master_tab,text='商品コード・名称・換算・出荷単位・期限の値を確認した',variable=self.master_ack).pack(anchor='w')
-        self.write_button(self.master_tab,text='確認済み商品マスタを保存',command=lambda:self.run(self.save_master)).pack(anchor='w',pady=5)
+        self.write_button(self.master_tab,text='確認済み商品マスタを保存',style='Primary.TButton',command=lambda:self.run(self.save_master)).pack(anchor='w',pady=5)
         self.master_status=tk.StringVar();ttk.Label(self.master_tab,textvariable=self.master_status,wraplength=1080).pack(anchor='w')
         ttk.Label(self.master_tab,text='コードは編集で変更しません。別コードは新商品で登録。削除や旧履歴の書換えは行いません。新商品には両倉庫の在庫・予測・補充条件等の整備が必要です。',wraplength=1080).pack(anchor='w',pady=5)
         self.use_registered_master=tk.BooleanVar(value=False)
