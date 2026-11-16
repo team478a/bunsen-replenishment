@@ -9,9 +9,10 @@ from .core import DataError, LABELS, units, validate
 from .service import write_reports
 from .shipping_output import write_documents
 from .legacy_ui import LegacyApp
+from .delivery_ui import DeliveryUI
 
 
-class App(LegacyApp):
+class App(DeliveryUI, LegacyApp):
     diagnostic_workflow=2
     def __init__(self, root, data_home=None):
         super().__init__(root,data_home)
@@ -53,6 +54,7 @@ class App(LegacyApp):
         ttk.Button(actions,text='5 保存済指示をExcel・PDF出力',command=lambda:self.run(self.export_saved)).pack(side='left',padx=5)
         self.detail=tk.Text(self.daily,height=10,wrap='word');self.detail.pack(fill='both',expand=True,pady=8)
         self._build_management(self.settings.master if self.settings.winfo_exists() else self.tabs.nametowidget(self.tabs.tabs()[1]))
+        self.build_delivery_tab()
         self.reason.trace_add('write',lambda *_:self.ack.set(False))
         self.allow_provisional.trace_add('write',lambda *_:self.invalidate())
         self.history();self.update_mode()
@@ -71,6 +73,12 @@ class App(LegacyApp):
         ttk.Label(row2,text='変更根拠').pack(side='left');ttk.Entry(row2,textvariable=self.setting_reason,width=40).pack(side='left',padx=4)
         ttk.Checkbutton(row2,text='担当者として値と根拠を確認した',variable=self.setting_checked).pack(side='left')
         self.write_button(row2,text='設定を履歴保存・再分析へ',command=lambda:self.run(self.apply_settings)).pack(side='left',padx=4)
+        expiry=ttk.Frame(parent);expiry.pack(fill='x',pady=5)
+        self.expiry_product=tk.StringVar();self.expiry_picker=ttk.Combobox(expiry,textvariable=self.expiry_product,state='readonly',width=15)
+        self.expiry_picker.pack(side='left');self.expiry_picker.bind('<<ComboboxSelected>>',self.select_expiry)
+        self.expiry_type=tk.StringVar();ttk.Combobox(expiry,textvariable=self.expiry_type,values=('賞味期限','消費期限'),state='readonly',width=10).pack(side='left',padx=4)
+        ttk.Label(expiry,text='製造からの期限日数').pack(side='left');self.expiry_days=tk.StringVar();ttk.Entry(expiry,textvariable=self.expiry_days,width=7).pack(side='left',padx=4)
+        self.write_button(expiry,text='期限マスタを確認保存（変更根拠・担当者必須）',command=lambda:self.run(self.apply_expiry)).pack(side='left',padx=4)
         self.settings=tk.Text(parent,height=7,wrap='word',state='disabled');self.settings.pack(fill='both',expand=True,pady=5)
         ttk.Label(parent,text='履歴は保持します。旧方式の指示は閲覧・従来HTML再出力のみで、新規業務へ引き継ぎません。',wraplength=1080).pack(anchor='w')
         self.history_list=tk.Listbox(parent,height=6);self.history_list.pack(fill='x',pady=5)
@@ -83,6 +91,7 @@ class App(LegacyApp):
         self.info.set('データ未取込（取込中、または不備による停止）。以前のデータでは確定できません。')
         self.settings.configure(state='normal');self.settings.delete('1.0','end');self.settings.configure(state='disabled')
         self.setting_picker.configure(values=());self.setting_key.set('');self.setting_checked.set(False)
+        self.expiry_picker.configure(values=());self.expiry_product.set('');self.expiry_type.set('');self.expiry_days.set('')
         for var in self.setting_values.values():var.set('')
         data=self.service.import_folder(folder,workflow=2)
         if data.workflow != 2:raise DataError(['旧形式CSVは履歴用です。新方式のreplenishment.csvを含む一式を指定してください'])
@@ -91,12 +100,15 @@ class App(LegacyApp):
         self.display_settings();self.show('取込完了。分析・補充計算を実行してください。')
 
     def invalidate(self,keep_draft=False):
+        self.invalidate_delivery()
         self.finalized=False
         super().invalidate(keep_draft=keep_draft)
 
     def display_settings(self):
         if not hasattr(self,'setting_picker') or self.data is None:return
         options=[r['warehouse']+' | '+r['product'] for r in self.data.tables['replenishment']]
+        self.expiry_picker.configure(values=[r['product'] for r in self.data.tables['products']])
+        self.expiry_product.set(self.data.tables['products'][0]['product']);self.select_expiry()
         self.setting_picker.configure(values=options)
         if options:self.setting_key.set(options[0]);self.select_settings()
         self.settings.configure(state='normal');self.settings.delete('1.0','end')
@@ -126,6 +138,20 @@ class App(LegacyApp):
         self.invalidate()
         self.dispatch=date.fromisoformat(self.day.get());self.expected_revision=self.service.latest_revision(self.dispatch)
         self.lines=self.service.calculate(self.data,self.dispatch,allow_provisional=self.allow_provisional.get());self.refresh()
+
+    def select_expiry(self,_event=None):
+        if self.data is None:return
+        row=next(r for r in self.data.tables['products'] if r['product']==self.expiry_product.get())
+        self.expiry_type.set({'best_before':'賞味期限','use_by':'消費期限'}.get(row.get('expiry_type'),''))
+        self.expiry_days.set(str(row.get('shelf_life_days','')))
+
+    def apply_expiry(self):
+        if self.data is None or not self.setting_checked.get():raise DataError(['データ取込と管理設定の確認チェックが必要です'])
+        text=self.expiry_days.get()
+        if not text.isascii() or not text.isdecimal():raise DataError(['期限日数は正整数です'])
+        self.data=self.service.update_product_expiry(self.data,self.expiry_product.get(),{'賞味期限':'best_before','消費期限':'use_by'}.get(self.expiry_type.get()),int(text),self.setting_reason.get(),self.operator.get())
+        self.invalidate();self.display_settings();self.setting_checked.set(False)
+        self.info.set('概算期限マスタを履歴保存しました。計画を再計算してください。入力CSVは変更していません。')
 
     def refresh(self):
         self.tree.delete(*self.tree.get_children())
@@ -180,6 +206,10 @@ class App(LegacyApp):
 
     def show_outlook(self):
         raise DataError(['新方式の分析結果と日別根拠を使用してください。旧14日参考見通しは旧形式用です'])
+
+    def history(self):
+        super().history()
+        self.refresh_delivery_history()
 
     def save_mapping_template(self):
         from .diagnostics import export_template

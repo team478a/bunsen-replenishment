@@ -61,6 +61,17 @@ def report_html(payload, warehouse):
 
 
 def xlsx_bytes(payload, warehouse):
+    grid=[[title(payload,warehouse)],[notice(payload)],[payload['number'],'出荷予定日',payload['dispatch'],'担当者',payload['operator']],
+          ['必要Pと確定Pは区別。未確定指示の確定Pは空欄。実出荷実績は含みません。'],[],HEADERS]+rows(payload,warehouse)
+    grid += [[],['データ識別',payload['digest']],['発行日時',payload['at']]]
+    for line in payload['lines']:
+        if line['warehouse']==warehouse:
+            grid += [[line['product'],'在庫基準',line['inventory_as_of'],'入庫網羅確認',line['transit_checked_at']],
+                     ['予測基準',', '.join(line['forecast_as_of'])],['警告',line['warning']]]
+    return xlsx_grid_bytes(grid)
+
+
+def xlsx_grid_bytes(grid):
     # Minimal standard OOXML, independent of Excel installations or proprietary runtimes.
     ns='http://schemas.openxmlformats.org/spreadsheetml/2006/main'
     ET.register_namespace('',ns)
@@ -72,13 +83,6 @@ def xlsx_bytes(payload, warehouse):
     for i,width in enumerate([14,26,13,13,14,13,13,13,13,8,8,30,16],1):
         ET.SubElement(cols,'{'+ns+'}col',min=str(i),max=str(i),width=str(width),customWidth='1')
     sheet=ET.SubElement(root,'{'+ns+'}sheetData')
-    grid=[[title(payload,warehouse)],[notice(payload)],[payload['number'],'出荷予定日',payload['dispatch'],'担当者',payload['operator']],
-          ['必要Pと確定Pは区別。未確定指示の確定Pは空欄。実出荷実績は含みません。'],[],HEADERS]+rows(payload,warehouse)
-    grid += [[],['データ識別',payload['digest']],['発行日時',payload['at']]]
-    for line in payload['lines']:
-        if line['warehouse']==warehouse:
-            grid += [[line['product'],'在庫基準',line['inventory_as_of'],'入庫網羅確認',line['transit_checked_at']],
-                     ['予測基準',', '.join(line['forecast_as_of'])],['警告',line['warning']]]
     for ri,values in enumerate(grid,1):
         row=ET.SubElement(sheet,'{'+ns+'}row',r=str(ri),ht='36' if ri in (1,2,6) else '30',customHeight='1')
         for ci,value in enumerate(values,1):

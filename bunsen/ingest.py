@@ -15,6 +15,7 @@ ENUMS = {'ship_unit': ('PL', 'CASE'), 'rounding': ('ceil', 'floor'),
          'expiry_basis': ('shipment', 'arrival'), 'order_basis': ('included',),
          'source': ('physical',)}
 ENUMS.update(basis=('opening', 'closing'), status=('confirmed', 'provisional', 'imputed'))
+ENUMS['expiry_type'] = ('best_before', 'use_by')
 DATE_FIELD = {'forecast': 'date', 'dry_stock': 'checked_at', 'inventory': 'as_of',
               'transit': 'arrival_date', 'policies': 'transit_checked_at'}
 
@@ -82,6 +83,12 @@ def inspect_folder(folder, now, *, workflow=None):
             if expected is not None:
                 raw[path.name] = content
                 columns = expected.split(',')
+                if v2 and name == 'products':
+                    for base in (columns, SCHEMA['products'].split(',')):
+                        extended = base[:-1] + ['expiry_type', 'shelf_life_days'] + base[-1:]
+                        if headers == extended:
+                            columns = extended
+                            break
                 legacy_product_header = v2 and name == 'products' and headers == SCHEMA['products'].split(',')
                 if headers != columns and not legacy_product_header:
                     info['status'] = 'header_error'
@@ -110,6 +117,8 @@ def inspect_folder(folder, now, *, workflow=None):
                     continue
                 line = reader.line_num
                 selected_headers = schema[name].split(',') if v2 else headers
+                if v2 and name == 'products' and 'shelf_life_days' in headers:
+                    selected_headers = selected_headers[:-1] + ['expiry_type', 'shelf_life_days'] + selected_headers[-1:]
                 row = {field: (cells[headers.index(field)].strip() if headers.index(field) < len(cells) else '') for field in selected_headers}
                 records[name].append((line, row))
                 before = len(issues)
@@ -117,6 +126,9 @@ def inspect_folder(folder, now, *, workflow=None):
                     issue(name, 'columns', 'ROW_WIDTH', '行の列数がヘッダーと一致しません', line=line, row=row)
                 converted = dict(row)
                 for field, value in row.items():
+                    if v2 and name == 'products' and field in ('expiry_type','shelf_life_days') and not row.get('expiry_type') and not row.get('shelf_life_days'):
+                        converted.pop(field, None)
+                        continue
                     if field in basis and value:
                         basis[field].add(value)
                     if not value:
@@ -194,5 +206,5 @@ def inspect_folder(folder, now, *, workflow=None):
         if info['status'] == 'checked' and info['filename'] in invalid_files:
             info['status'] = 'invalid'
     if v2:
-        skipped.append('ブンセン在庫・朝照合・出荷ロット/期限/車両検証は新方式の対象外。必要補充指示は実出荷実績ではありません。')
+        skipped.append('ブンセン在庫・朝照合・実出荷ロット/実期限/重量検証は対象外。14日計画の概算期限と16PL枠検査は別機能。必要補充指示は実出荷実績ではありません。')
     return Inspection(None if issues else Dataset(tables, raw, digest, locations, 2 if v2 else 0), issues, files, skipped, consistency)
