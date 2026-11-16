@@ -66,6 +66,7 @@ class DeliveryUI:
               '計算実行日時 '+r['calculated_at']+' / 固定した仮製造日 '+r['assumed_manufacture_date'],NOTICE,
               '16PL枠以下・1PL1商品。甲端数も1枠使用。重量・容積・休日・大域最適性は未確認。']
         text+=r['warnings'] or ['参考警告なし（実期限の適合確認ではありません）']
+        if r.get('product_master_revision') is not None:text.insert(2,f'登録商品マスタ版 {r["product_master_revision"]}（計算時の保存原本）')
         text += [f'{v["warehouse"]} {v["product"]}: 在庫基準 {v["as_of"]} ({v["basis"]})' for v in r['inventory_basis']]
         text+=['日別予測・安全在庫・計画入庫は出力JSON/Excelで確認できます。',json.dumps(r['expiry_risks'],ensure_ascii=False)]
         if r.get('trial_only'):text.insert(0,'架空試用・実出荷不可')

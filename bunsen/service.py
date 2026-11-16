@@ -13,13 +13,14 @@ from pathlib import Path
 
 from .core import DataError, LABELS, WAREHOUSES, allocations, calculate, load, now_jst, units, validate, stamp
 from .planning import compare, comparison_text, overlay
+from .catalog import CatalogService, catalog_csv
 
 
 def encode(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
-class Service:
+class Service(CatalogService):
     def __init__(self, db_path, clock=now_jst):
         self.clock = clock
         self.db_path = Path(db_path).resolve()
@@ -71,28 +72,43 @@ class Service:
             self.db.execute('INSERT INTO events(at,kind,payload) VALUES(?,?,?)',
                             (self.clock().isoformat(), kind, encode(payload)))
 
-    def import_folder(self, folder, *, workflow=None):
+    def import_folder(self, folder, *, workflow=None, use_registered_products=False):
         self.ensure_writable()
         try:
             if workflow == 2 and not (Path(folder)/'replenishment.csv').is_file():
                 raise DataError(['replenishment.csv: 新方式の補充条件CSVが必要です。旧入力は履歴用です'])
-            data = load(folder, self.clock(),workflow=workflow)
+            state=None
+            if use_registered_products:
+                if workflow != 2:raise DataError(['登録商品マスタは新方式の取込で使用してください'])
+                state=self.product_master()
+                if not state['products']:raise DataError(['登録商品マスタがありません。商品マスタ画面で確認登録してください'])
+            data = (load(folder,self.clock(),workflow=workflow,product_csv=catalog_csv(state['products']))
+                    if state else load(folder,self.clock(),workflow=workflow))
+            if state:
+                data.product_master_revision=state['revision']
+                self.assert_product_master_current(data)
             if workflow is not None and data.workflow != workflow:
                 raise DataError(['指定した業務方式とCSV形式が一致しません'])
         except DataError as exc:
             self.event('import_failed', {'errors': exc.errors})
             raise
-        self.event('import', {'digest': data.digest, 'raw': data.raw})
+        payload={'digest': data.digest, 'raw': data.raw}
+        if state:payload['product_master_revision']=state['revision']
+        self.event('import', payload)
         return data
 
     def calculate(self, data, dispatch, *, allow_provisional=False):
         self.ensure_writable()
+        self.assert_product_master_current(data)
         lines = calculate(data, dispatch, allow_provisional=allow_provisional)
-        self.event('calculate', {'digest': data.digest, 'dispatch': dispatch.isoformat(), 'lines': lines})
+        payload={'digest': data.digest, 'dispatch': dispatch.isoformat(), 'lines': lines}
+        if data.product_master_revision is not None:payload['product_master_revision']=data.product_master_revision
+        self.event('calculate', payload)
         return lines
 
     def edit_quantity(self, data, lines, key, quantity, reason, operator):
         self.ensure_writable()
+        self.assert_product_master_current(data)
         if data.workflow != 2 or type(quantity) is not int or quantity < 0 or not reason.strip() or not operator.strip():
             raise DataError(['修正には新方式データ・0以上の整数数量・修正理由・担当者が必要です'])
         row = next((r for r in lines if (r['warehouse'],r['product']) == key), None)
@@ -107,6 +123,7 @@ class Service:
 
     def update_settings(self, data, key, values, reason, operator):
         self.ensure_writable()
+        self.assert_product_master_current(data)
         allowed = {'cycle_days','lead_days','safety_days','coverage_days'}
         if data.workflow != 2 or set(values) != allowed or not reason.strip() or not operator.strip():
             raise DataError(['設定変更には4設定・変更理由・確認担当者が必要です'])
@@ -123,6 +140,7 @@ class Service:
         writer.writeheader(); writer.writerows(rows)
         raw = dict(data.raw,**{'replenishment.csv':stream.getvalue()})
         fresh = self.snapshot_data(raw)
+        fresh.product_master_revision=data.product_master_revision
         self.event('settings_change',dict(before=before,after=row,reason=reason.strip(),operator=operator.strip(),
                                          before_digest=data.digest,digest=fresh.digest,raw=fresh.raw))
         return fresh
@@ -133,6 +151,7 @@ class Service:
 
     def update_product_expiry(self, data, product, expiry_type, shelf_life_days, reason, operator):
         self.ensure_writable()
+        self.assert_product_master_current(data)
         if data.workflow != 2 or expiry_type not in ('best_before','use_by') or type(shelf_life_days) is not int or shelf_life_days <= 0 or not reason.strip() or not operator.strip():
             raise DataError(['期限マスタには種別・正整数日数・確認理由・担当者が必要です'])
         reader = csv.DictReader(io.StringIO(data.raw['products.csv']))
@@ -146,6 +165,11 @@ class Service:
         stream = io.StringIO(newline='');writer=csv.DictWriter(stream,fieldnames=fields,lineterminator='\n')
         writer.writeheader();writer.writerows(rows)
         fresh=self.snapshot_data(dict(data.raw,**{'products.csv':stream.getvalue()}))
+        if data.product_master_revision is not None:
+            values=next(dict(p) for p in fresh.tables['products'] if p['product']==product)
+            values.pop('confirmed')
+            state=self.save_product_master(values,reason,operator,True,expected_revision=data.product_master_revision,create=False)
+            fresh.product_master_revision=state['revision']
         self.event('product_expiry_change',dict(product=product,before=before,after=row,reason=reason.strip(),operator=operator.strip(),
                                                 before_digest=data.digest,digest=fresh.digest,raw=fresh.raw))
         return fresh
@@ -153,9 +177,11 @@ class Service:
     def calculate_delivery_plan(self, data, start, *, allow_provisional=False):
         from .delivery import build_plan
         self.ensure_writable()
+        self.assert_product_master_current(data)
         fresh=self.snapshot_data(data.raw,data.digest)
         report=build_plan(fresh,start,self.clock(),allow_provisional=allow_provisional)
         report.update(plan_id='DP-'+uuid.uuid4().hex,trial_only=self.trial_only)
+        if data.product_master_revision is not None:report['product_master_revision']=data.product_master_revision
         self.event('delivery_plan',dict(report=report,raw=fresh.raw))
         return report
 
@@ -185,6 +211,8 @@ class Service:
                         if json.loads(r[0])['report']['plan_id']==plan_id),None)
             if saved is None:raise DataError(['配送計画の原本がありません'])
             report=saved['report']
+            if report.get('product_master_revision') is not None and report['product_master_revision']!=self.product_master()['revision']:
+                raise DataError(['登録商品マスタが変更されています。配送計画を再取込・再計算・再確認してください'])
             if date.fromisoformat(report['start']) < stamp(self.clock().isoformat()).date():
                 raise DataError(['過去日を含む配送予定は確定できません。新たに計算してください'])
             fresh=self.snapshot_data(saved['raw'],report['digest'])
@@ -222,6 +250,8 @@ class Service:
         self.ensure_writable()
         draft = self.draft(number)
         data = self.snapshot_data(draft['raw'], draft['digest'])
+        data.product_master_revision=draft.get('product_master_revision')
+        self.assert_product_master_current(data)
         dispatch = date.fromisoformat(draft['dispatch'])
         lines = overlay(calculate(data, dispatch), draft['lines'])
         self.event('resume_draft', {'number': number, 'digest': data.digest, 'lines': lines})
@@ -229,6 +259,7 @@ class Service:
 
     def reconcile_draft(self, number, data, working_lines=None):
         self.ensure_writable()
+        self.assert_product_master_current(data)
         draft = self.draft(number)
         dispatch = date.fromisoformat(draft['dispatch'])
         fresh = self.snapshot_data(data.raw, data.digest)
@@ -245,6 +276,7 @@ class Service:
 
     def issue(self, data, lines, dispatch, operator, formal, acknowledged=False, *, expected_revision=0, draft_number=None):
         self.ensure_writable()
+        self.assert_product_master_current(data)
         # Reparse all typed values and recompute evidence, never reuse saved checks.
         fresh = self.snapshot_data(data.raw, data.digest)
         if fresh.workflow == 2:
@@ -267,12 +299,14 @@ class Service:
                    'validation': errors, 'dispatch': dispatch.isoformat(), 'at': at}
         if fresh.workflow == 2:
             payload.update(workflow=2,meaning='replenishment_instruction_not_shipment_actual',settings=fresh.tables['replenishment'])
+            if data.product_master_revision is not None:payload['product_master_revision']=data.product_master_revision
         if reference:
             payload['source_draft'] = reference
         if self.trial_only:
             payload['trial_only'] = True
         try:
             self.db.execute('BEGIN IMMEDIATE')
+            self.assert_product_master_current(data)
             if source and self.latest_revision(dispatch, False) != source['revision']:
                 raise DataError(['再開元の仮指示が更新されました。最新の仮指示を再開し、再確認してください'])
             current = self.latest_revision(dispatch, formal)

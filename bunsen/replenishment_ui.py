@@ -10,9 +10,10 @@ from .service import write_reports
 from .shipping_output import write_documents
 from .legacy_ui import LegacyApp
 from .delivery_ui import DeliveryUI
+from .catalog_ui import CatalogUI
 
 
-class App(DeliveryUI, LegacyApp):
+class App(CatalogUI, DeliveryUI, LegacyApp):
     diagnostic_workflow=2
     def __init__(self, root, data_home=None):
         super().__init__(root,data_home)
@@ -55,6 +56,7 @@ class App(DeliveryUI, LegacyApp):
         self.detail=tk.Text(self.daily,height=10,wrap='word');self.detail.pack(fill='both',expand=True,pady=8)
         self._build_management(self.settings.master if self.settings.winfo_exists() else self.tabs.nametowidget(self.tabs.tabs()[1]))
         self.build_delivery_tab()
+        self.build_product_master_tab()
         self.reason.trace_add('write',lambda *_:self.ack.set(False))
         self.allow_provisional.trace_add('write',lambda *_:self.invalidate())
         self.history();self.update_mode()
@@ -92,11 +94,14 @@ class App(DeliveryUI, LegacyApp):
         self.settings.configure(state='normal');self.settings.delete('1.0','end');self.settings.configure(state='disabled')
         self.setting_picker.configure(values=());self.setting_key.set('');self.setting_checked.set(False)
         self.expiry_picker.configure(values=());self.expiry_product.set('');self.expiry_type.set('');self.expiry_days.set('')
+        self.master_source_picker.configure(values=());self.master_source.set('')
         for var in self.setting_values.values():var.set('')
-        data=self.service.import_folder(folder,workflow=2)
+        data=(self.service.import_folder(folder,workflow=2,use_registered_products=True) if self.use_registered_master.get()
+              else self.service.import_folder(folder,workflow=2))
         if data.workflow != 2:raise DataError(['旧形式CSVは履歴用です。新方式のreplenishment.csvを含む一式を指定してください'])
         self.data=data;self.folder=folder
-        self.info.set(f'取込済み: {folder} / データ識別 {data.digest[:16]}。ブンセン在庫は使用しません。')
+        source=f'登録商品マスタ版{data.product_master_revision}' if data.product_master_revision is not None else 'CSV商品マスタ'
+        self.info.set(f'取込済み: {folder} / {source} / データ識別 {data.digest[:16]}。ブンセン在庫は使用しません。')
         self.display_settings();self.show('取込完了。分析・補充計算を実行してください。')
 
     def invalidate(self,keep_draft=False):
@@ -106,6 +111,7 @@ class App(DeliveryUI, LegacyApp):
 
     def display_settings(self):
         if not hasattr(self,'setting_picker') or self.data is None:return
+        self.refresh_product_master()
         options=[r['warehouse']+' | '+r['product'] for r in self.data.tables['replenishment']]
         self.expiry_picker.configure(values=[r['product'] for r in self.data.tables['products']])
         self.expiry_product.set(self.data.tables['products'][0]['product']);self.select_expiry()
@@ -210,6 +216,7 @@ class App(DeliveryUI, LegacyApp):
     def history(self):
         super().history()
         self.refresh_delivery_history()
+        self.refresh_product_master()
 
     def save_mapping_template(self):
         from .diagnostics import export_template

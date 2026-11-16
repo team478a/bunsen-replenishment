@@ -8,6 +8,6 @@ BunsenTools.exe acceptance-kit --dispatch YYYY-MM-DD --output 新規フォルダ
 
 GUIDE.mdと[受入手順](acceptance-test.md)で人が実結果・日時・担当者・証拠先を記入します。初期状態は全項目未実施、承認未確認。自動テストで現場結果を成功へ変更しません。試用帳票は実出荷に使用しないでください。
 
-13項目の受入記録はexpectedに期待結果を記載し、actual/evidence/operator/performed_atを人が記入します。同梱OPERATIONAL-READINESS.md（[原本](operational-readiness.md)）で実CSV・正式マスタ・計算照合・実プリンター・保存/復旧/配布の確認を残します。多品目例の初回は商品ごと神戸432P/杉戸216P、倉庫合計3456P/1728P、神戸19枠→2便（16+3）です。
+14項目の受入記録はexpectedに期待結果を記載し、actual/evidence/operator/performed_atを人が記入します。商品マスタ画面の登録・適用・不足停止も確認します。同梱OPERATIONAL-READINESS.md（[原本](operational-readiness.md)）で実CSV・正式マスタ・計算照合・実プリンター・保存/復旧/配布の確認を残します。多品目例の初回は商品ごと神戸432P/杉戸216P、倉庫合計3456P/1728P、神戸19枠→2便（16+3）です。
 
 旧版キットはアプリ版が異なるため新規生成してください。旧キット・履歴は削除しません。長文のExcel印刷は行高を調整し、上限を超える場合はセル位置を示して停止します。PDFは長い行をページ内で分割します。実機での最終的な表示・印刷適合は受入記録へ残してください。
