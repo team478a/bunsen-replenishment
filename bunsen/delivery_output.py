@@ -49,7 +49,7 @@ def plan_pdf(report, warehouse):
     story=[para(f'14日配送計画 - {LABELS[warehouse]} / {report["plan_id"]}'),para(plan_notice(report)),
            para(f'計算実行 {report["calculated_at"]} / 仮製造日 {report["assumed_manufacture_date"]} / 担当者 {report.get("operator","未確認")}'),Spacer(1,8)]
     def table(head,rows,widths):
-        t=Table([[para(v) for v in head]]+[[para(v) for v in row] for row in rows],colWidths=widths,repeatRows=1)
+        t=Table([[para(v) for v in head]]+[[para(v) for v in row] for row in rows],colWidths=widths,repeatRows=1,splitInRow=1)
         t.setStyle(TableStyle([('GRID',(0,0),(-1,-1),.3,colors.grey),('BACKGROUND',(0,0),(-1,0),colors.HexColor('#e5eff5')),('VALIGN',(0,0),(-1,-1),'TOP'),('TOPPADDING',(0,0),(-1,-1),5),('BOTTOMPADDING',(0,0),(-1,-1),5)]))
         return t
     story += [table(HEADERS,grid_rows(report,warehouse),[44,73,73,45,76,55,34,48,73,35,35,80]),Spacer(1,10),para('日別予測（実在庫の期限切れ・廃棄数量は算出しません）')]
@@ -63,7 +63,8 @@ def plan_pdf(report, warehouse):
         if report.get('restored_view'):flag+='復元参考・実出荷不可 / '
         if not report['formal']:flag+='未確定 / '
         canvas.drawString(22,12,flag+'今日製造した場合の概算期限。実期限・実出荷を保証しません。')
-        canvas.drawRightString(810,12,str(document.page))
+        canvas.setFont(font,7)
+        canvas.drawRightString(810,12,f'{warehouse} / {report["plan_id"]} / {document.page}')
     doc.build(story,onFirstPage=footer,onLaterPages=footer)
     return output.getvalue()
 

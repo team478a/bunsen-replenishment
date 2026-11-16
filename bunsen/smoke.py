@@ -128,6 +128,7 @@ def run_smoke(output):
         run_v2_smoke(home)
         checks.append('destination_only_v2_ui_excel_pdf')
         checks.append('delivery_14day_estimated_expiry')
+        checks.append('many_product_print_readiness')
     result = dict(version=__version__, frozen=bool(getattr(sys, 'frozen', False)),
                   executable=Path(sys.executable).name, checks=checks, success=True)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -170,6 +171,24 @@ def run_v2_smoke(home):
         report=current.service.delivery_plan(current.delivery_report['plan_id'])
         assert report['formal'] and report['trial_only']
         assert len(export_plan(report,target/'delivery-reports'))==7
+        kit=target/'readiness-kit'
+        manifest=create_kit(kit,current.service.clock().date(),current.service.clock(),workflow=2)
+        assert len(manifest['files'])==20 and (kit/'OPERATIONAL-READINESS.md').is_file()
+        prepare_trial_home(kit)
+        current.data=current.service.import_folder(kit/'samples/report-many-products')
+        current.compute()
+        assert len(current.lines)==16
+        assert sum(r['quantity_p'] for r in current.lines if r['warehouse']=='KOBE')==3456
+        current.tree.selection_set('0');current.selected();current.qty.set('480');current.reason.set('架空の長い修正理由・印刷試験。'*10);current.edit()
+        current.ack.set(True);current.issue(True)
+        assert len(write_documents(current.service.report_payload(current.last_number),target/'many-reports'))==6
+        current.compute_delivery();current.delivery_ack.set(True);current.confirm_delivery()
+        report=current.service.delivery_plan(current.delivery_report['plan_id'])
+        first=[t['pallets'] for t in report['trips'] if t['warehouse']=='KOBE' and t['dispatch']=='2026-11-09']
+        assert first==[16,3]
+        assert len(export_plan(report,target/'many-delivery-reports'))==7
+        record=json.loads((kit/'acceptance-record.json').read_text(encoding='utf-8'))
+        assert record['overall_status']=='not_performed' and all(c['status']=='not_performed' and c['expected'] for c in record['cases'])
     finally:
         if current is not None:current.close()
         else:root.destroy()

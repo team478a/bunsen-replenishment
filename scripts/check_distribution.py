@@ -101,6 +101,8 @@ def check(archive_path, result_path):
         record = json.loads((kit / 'acceptance-record.json').read_text(encoding='utf-8'))
         if not kit_info['trial_only'] or record['overall_status'] != 'not_performed':
             raise ValueError('Acceptance evidence incorrectly recorded')
+        if len(kit_info['files'])!=20 or not (kit/'OPERATIONAL-READINESS.md').is_file() or not all(c.get('expected') and c['status']=='not_performed' for c in record['cases']):
+            raise ValueError('Delivery/many-product exercises or human acceptance criteria missing')
         if (kit / 'trial-data').exists():
             raise ValueError('Kit generation created a database')
         collision = run([str(bundle / 'BunsenTools.exe'), 'acceptance-kit', '--dispatch', '2026-11-10', '--output', str(kit)], check=False)

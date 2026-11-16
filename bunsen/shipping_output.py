@@ -1,6 +1,8 @@
 """Direct, warehouse-specific OOXML/PDF output; no business workbook dependency."""
 import html
 import io
+import math
+import unicodedata
 from pathlib import Path
 from xml.etree import ElementTree as ET
 from zipfile import ZipFile, ZIP_DEFLATED
@@ -80,11 +82,22 @@ def xlsx_grid_bytes(grid):
     views=ET.SubElement(root,'{'+ns+'}sheetViews');view=ET.SubElement(views,'{'+ns+'}sheetView',workbookViewId='0')
     ET.SubElement(view,'{'+ns+'}pane',ySplit='6',topLeftCell='A7',state='frozen')
     cols=ET.SubElement(root,'{'+ns+'}cols')
-    for i,width in enumerate([14,26,13,13,14,13,13,13,13,8,8,30,16],1):
+    widths=[14,26,13,13,14,13,13,13,13,8,8,30,16]
+    for i,width in enumerate(widths,1):
         ET.SubElement(cols,'{'+ns+'}col',min=str(i),max=str(i),width=str(width),customWidth='1')
     sheet=ET.SubElement(root,'{'+ns+'}sheetData')
+    merged_rows={1,2,4}|{ri for ri,values in enumerate(grid,1) if len(values)==1 and isinstance(values[0],str)}
     for ri,values in enumerate(grid,1):
-        row=ET.SubElement(sheet,'{'+ns+'}row',r=str(ri),ht='36' if ri in (1,2,6) else '30',customHeight='1')
+        font_size=13 if ri in (1,6) else 11
+        height=36 if ri in (1,2,6) else 30
+        for ci,value in enumerate(values):
+            width=(sum(widths) if ri in merged_rows else widths[ci])-2
+            lines=sum(max(1,math.ceil(sum(2 if unicodedata.east_asian_width(c) in ('W','F') else 1 for c in part)/(width*11/font_size)))
+                      for part in str(value if value is not None else '').split('\n'))
+            height=max(height,lines*(font_size+5)+10)
+            if height>409:
+                raise DataError([f'Excelの印刷行高上限を超えます: {chr(65+ci)}{ri}。品名・理由などの長文を見直してください（内容は切り捨てません）'])
+        row=ET.SubElement(sheet,'{'+ns+'}row',r=str(ri),ht=str(height),customHeight='1')
         for ci,value in enumerate(values,1):
             if value is None:continue
             letter=chr(64+ci)
@@ -94,8 +107,8 @@ def xlsx_grid_bytes(grid):
             else:
                 cell.set('t','inlineStr');text=ET.SubElement(ET.SubElement(cell,'{'+ns+'}is'),'{'+ns+'}t')
                 text.text=''.join(c for c in str(value) if ord(c)>=32 or c in '\n\t\r')
-    merges=ET.SubElement(root,'{'+ns+'}mergeCells',count='3')
-    for ref in ('A1:M1','A2:M2','A4:M4'):ET.SubElement(merges,'{'+ns+'}mergeCell',ref=ref)
+    merges=ET.SubElement(root,'{'+ns+'}mergeCells',count=str(len(merged_rows)))
+    for ri in sorted(merged_rows):ET.SubElement(merges,'{'+ns+'}mergeCell',ref=f'A{ri}:M{ri}')
     ET.SubElement(root,'{'+ns+'}pageSetup',orientation='landscape',paperSize='9',fitToWidth='1',fitToHeight='0')
     files={
         '[Content_Types].xml':'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>',
@@ -128,7 +141,7 @@ def pdf_bytes(payload, warehouse):
            para(f'{payload["number"]} / 出荷予定日 {payload["dispatch"]} / 担当者 {payload["operator"]} / {payload["at"]}'),Spacer(1,10)]
     indexes=[0,1,5,6,7,8,9,10,12,11]
     grid=[[para(HEADERS[i]) for i in indexes]]+[[para(row[i]) for i in indexes] for row in rows(payload,warehouse)]
-    table=Table(grid,colWidths=[55,120,60,65,60,60,35,35,85,100],repeatRows=1,hAlign='LEFT')
+    table=Table(grid,colWidths=[55,120,60,65,60,60,35,35,85,100],repeatRows=1,hAlign='LEFT',splitInRow=1)
     table.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.HexColor('#e5eff5')),('GRID',(0,0),(-1,-1),.4,colors.grey),('VALIGN',(0,0),(-1,-1),'TOP'),('TOPPADDING',(0,0),(-1,-1),6),('BOTTOMPADDING',(0,0),(-1,-1),6)]))
     story += [table,Spacer(1,12),para('根拠・警告（予測は確定在庫ではありません）')]
     for line in payload['lines']:
