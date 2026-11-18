@@ -3,10 +3,12 @@ import copy
 from datetime import date, timedelta
 
 from .core import DataError, ValidationIssue, case_p, now_jst, stamp, JST
+from .requirements_data import active, pallet_p, NOTICE
 
 
 def calculate(data, dispatch, *, allow_provisional=False):
     errors, result = [], []
+    pl_only=active(data)
     products = {r['product']: r for r in data.tables['products']}
     for inv in data.tables['inventory']:
         w, p = inv['warehouse'], inv['product']
@@ -14,6 +16,7 @@ def calculate(data, dispatch, *, allow_provisional=False):
         setting = next(r for r in data.tables['replenishment'] if (r['warehouse'], r['product']) == (w, p))
         def error(table, field, code, message, day=dispatch, key=None):
             key = (w, p) if key is None else key
+            if pl_only and table=='replenishment':table='requirements'
             errors.append(ValidationIssue(table+'.csv', field, code, message,
                           line=data.locations.get(table, {}).get(key), warehouse=w, product=p,
                           date=str(day), phase='calculation'))
@@ -30,7 +33,7 @@ def calculate(data, dispatch, *, allow_provisional=False):
         if snapshot > dispatch or first > arrival:
             error('inventory', 'as_of/basis', 'INVENTORY_AFTER_DISPATCH', '在庫基準が出荷日・到着日より未来です')
             continue
-        if stamp(setting['transit_checked_at']) != stamp(inv['as_of']):
+        if not pl_only and stamp(setting['transit_checked_at']) != stamp(inv['as_of']):
             error('replenishment', 'transit_checked_at', 'TRANSIT_SNAPSHOT', '確定入庫の網羅確認日時が在庫基準日時と一致しません')
         forecast = {date.fromisoformat(r['date']): r for r in data.tables['forecast'] if (r['warehouse'], r['product']) == (w, p)}
         days = sorted(d for d in forecast if first <= d <= forecast_end)
@@ -50,7 +53,7 @@ def calculate(data, dispatch, *, allow_provisional=False):
         if cursor is not None:
             error('forecast', 'quantity_p', 'FORECAST_MISSING', f'{cursor}から{forecast_end}の予測欠損', cursor, (w,p,str(cursor)))
         receipts = {}
-        for r in data.tables['transit']:
+        for r in ([] if pl_only else data.tables['transit']):
             if (r['warehouse'],r['product']) != (w,p):
                 continue
             day = date.fromisoformat(r['arrival_date'])
@@ -75,11 +78,11 @@ def calculate(data, dispatch, *, allow_provisional=False):
             safety = prefix[index+1+setting['safety_days']] - prefix[index+1]
             if day >= arrival:
                 needed = max(needed, safety-balance)
-            timeline.append(dict(date=str(day),opening_p=opening,transit_p=incoming,forecast_p=demand,
+            timeline.append(dict(date=str(day),opening_p=opening,transit_p=None if pl_only else incoming,forecast_p=demand,
                                  projected_closing_p=balance,safety_p=safety,
                                  timing_unconfirmed=bool(incoming and opening-demand < 0)))
         needed = max(0,needed)
-        multiple = case_p(products[p])
+        multiple = pallet_p(data,w,p) if pl_only else case_p(products[p])
         adjusted = ((needed+multiple-1)//multiple)*multiple
         risk = [r['date'] for r in timeline if r['date'] < str(arrival) and r['projected_closing_p'] < 0]
         uncertain = [str(d) for d in days if forecast[d]['status'] != 'confirmed']
@@ -95,13 +98,14 @@ def calculate(data, dispatch, *, allow_provisional=False):
         result.append(dict(workflow=2,warehouse=w,product=p,dispatch=str(dispatch),arrival=str(arrival),
                            end=str(end),inventory_p=inv['quantity_p'],inventory_as_of=inv['as_of'],inventory_basis=inv['basis'],
                            forecast_as_of=sorted({forecast[d]['as_of'] for d in days}),
-                           transit_checked_at=setting['transit_checked_at'],transit_p=sum(receipts.values()),
+                           transit_checked_at=None if pl_only else setting['transit_checked_at'],transit_p=None if pl_only else sum(receipts.values()),
+                           source_pdf=inv.get('source_pdf'),source_sha256=inv.get('source_sha256'),inventory_checker=inv.get('checker'),
                            before_p=sum(r['forecast_p'] for r in timeline if r['date'] < str(arrival)),
                            demand_p=sum(r['forecast_p'] for r in timeline if r['date'] >= str(arrival)),
                            safety_p=max(r['safety_p'] for r in timeline if r['date'] >= str(arrival)),
                            required_p=needed,suggested_p=adjusted,quantity_p=adjusted,lot='',edit_reason='',
                            settings=dict(setting),allow_provisional=bool(allow_provisional),forecast_confirmed=not uncertain,
-                           timeline=timeline,warning=' / '.join(warnings),rounding='ceil_case',unit_p=multiple))
+                           timeline=timeline,warning=' / '.join(warnings),rounding='ceil_physical_pl' if pl_only else 'ceil_case',unit_p=multiple))
     if errors:
         raise DataError(errors)
     return result
@@ -122,7 +126,7 @@ def overlay(calculated, requested):
         if type(qty) is not int or qty < 0 or not isinstance(reason,str):
             raise DataError(['数量は0以上の整数、修正理由は文字列で指定してください'])
         if qty % row['unit_p']:
-            raise DataError(['指示数量は商品マスタの甲単位にしてください（自動補正しません）'])
+            raise DataError(['指示数量は計算行の出荷単位にしてください（JAN方式は物理PLのみ、自動補正しません）'])
         if qty != row['suggested_p'] and not reason.strip():
             raise DataError(['自動計算値と異なる数量には修正理由が必要です'])
         row.update(quantity_p=qty,edit_reason=reason)
@@ -140,8 +144,8 @@ def validate(data, lines, dispatch, now=None):
         context = f'倉庫={row["warehouse"]} 商品={row["product"]} 出荷日={dispatch}'
         if not row['forecast_confirmed']:
             errors.append(context+': 未確定・補完/暫定予測を使用した結果は正式確定できません')
-        if row['quantity_p'] % case_p(products[row['product']]):
-            errors.append(context+': 指示数量は商品別の甲単位にしてください')
+        if row['quantity_p'] % (pallet_p(data,row['warehouse'],row['product']) if active(data) else case_p(products[row['product']])):
+            errors.append(context+': 指示数量は出荷単位にしてください（JAN方式は倉庫別の物理PLのみ）')
         if row['quantity_p'] != row['suggested_p'] and not row['edit_reason'].strip():
             errors.append(context+': 自動計算値と異なる数量には修正理由が必要です')
     return errors

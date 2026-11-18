@@ -2,6 +2,7 @@
 from datetime import date, timedelta
 
 from .core import DataError, JST, ValidationIssue, calculate, case_p
+from .requirements_data import active, pallet_p, PROFILE, NOTICE as REQUIREMENTS_NOTICE
 
 NOTICE = '今日製造した場合の概算期限（計算実行日を固定）。実商品の期限適合性・供給可能性・実出荷を保証しません。実在庫の期限・廃棄数量は不明です。'
 
@@ -42,15 +43,18 @@ def build_plan(data, start, calculated_at, *, allow_provisional=False):
             deficit = max([0]+[d['safety_p']-d['projected_closing_p']-sum(q for a,q in prior if a <= date.fromisoformat(d['date']))
                                  for d in row['timeline'] if d['date'] >= row['arrival']])
             p = products[key[1]]
-            qty = ((deficit+case_p(p)-1)//case_p(p))*case_p(p)
+            multiple=row['unit_p'] if active(data) else case_p(p)
+            qty = ((deficit+multiple-1)//multiple)*multiple
             if not qty:
                 continue
             prior.append((arrival,qty));last_dispatch[key] = dispatch
             shipments.append(dict(warehouse=key[0],product=key[1],name=p['name'],dispatch=str(dispatch),arrival=str(arrival),
-                                  required_p=deficit,quantity_p=qty,p_per_pl=case_p(p)*p['cases_per_pl'],
+                                  required_p=deficit,quantity_p=qty,p_per_pl=pallet_p(data,*key) if active(data) else case_p(p)*p['cases_per_pl'],pl_only=active(data),
                                   expiry_type=p['expiry_type'],estimated_expiry=str(expiry[key[1]]),
                                   remaining_dispatch_days=(expiry[key[1]]-dispatch).days,
                                   remaining_arrival_days=(expiry[key[1]]-arrival).days))
+    if not active(data):
+        for shipment in shipments:shipment.pop('pl_only',None)
     trips = pack_trips(shipments)
     timelines, warnings = [], []
     for row in baselines[-1]:
@@ -90,13 +94,17 @@ def build_plan(data, start, calculated_at, *, allow_provisional=False):
             warnings.append(f'{key[0]} {key[1]}: 概算期限までの予測不足のため過大補充リスクは確認不能')
         elif excess:
             warnings.append(f'{key[0]} {key[1]}: 追加補充が概算期限内の予測需要を{excess}P超過（参考比較、廃棄量ではない）')
-    return dict(format='bunsen-delivery-plan',version=1,start=str(start),end=str(end),calculated_at=calculated_at.isoformat(),
+    report = dict(format='bunsen-delivery-plan',version=1,start=str(start),end=str(end),calculated_at=calculated_at.isoformat(),
                 assumed_manufacture_date=str(manufactured),notice=NOTICE,capacity_pl=16,single_product_per_pl=True,
                 method='日付順・倉庫別・商品コード順のルール計算（大域最適性は未保証）',
                 allow_provisional=bool(allow_provisional),forecast_confirmed=all(r['forecast_confirmed'] for rows in baselines for r in rows),
                 digest=data.digest,products=data.tables['products'],settings=data.tables['replenishment'],
-                inventory_basis=data.tables['inventory'],forecast_basis=data.tables['forecast'],confirmed_inbound=data.tables['transit'],
+                inventory_basis=data.tables['inventory'],forecast_basis=data.tables['forecast'],confirmed_inbound=None if active(data) else data.tables['transit'],
                 shipments=shipments,trips=trips,timeline=timelines,expiry_risks=risks,warnings=warnings,formal=False)
+    if active(data):
+        report.update(profile=PROFILE,inbound_scope='excluded',pallet_masters=data.tables['pallets'],method='日付順・倉庫別・JAN順の物理PLルール計算（大域最適性は未保証）')
+        report['warnings'].insert(0,REQUIREMENTS_NOTICE)
+    return report
 
 
 def pack_trips(shipments):

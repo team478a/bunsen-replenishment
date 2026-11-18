@@ -1,3 +1,12 @@
+JAN・物理PL方式（0.5.0-preview.1）
+新方式の手順は docs/jan-pl-contract.md を参照してください。
+JAN単位・神戸/杉戸別の物理1PL数量を使い、入庫/輸送中は計算対象外です。
+報告PDFは原本証跡と確認転記を使います。PDF数量の自動抽出はありません。
+BunsenTools.exe jan-kit --dispatch 試験日YYYY-MM-DD --output 新規試用フォルダー
+BunsenReplenishment.exe --data-dir 新規試用フォルダー\home
+架空キットのcsvを取り込みます。実資料の未確認値は自動登録されません。
+以下のreplenishment.csv方式の案内は従来v2互換用です。
+
 ブンセン 補充出荷指示アプリ — 署名なし試用版
 
 1. ZIP全体を新しいフォルダーへ展開してください。

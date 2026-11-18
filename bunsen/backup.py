@@ -18,6 +18,7 @@ import uuid
 import zipfile
 
 from .core import DataError, SCHEMA, V2_SCHEMA, now_jst, stamp
+from .requirements_data import SCHEMA as REQUIREMENTS_SCHEMA
 
 MAX_FILE = 1024 ** 3
 MAX_TOTAL = 2 * MAX_FILE
@@ -50,7 +51,7 @@ def copy_limited(source, destination, limit):
 
 
 def raw_digest(raw):
-    if not isinstance(raw, dict) or not raw or any(name not in {k + '.csv' for k in (SCHEMA.keys() | V2_SCHEMA.keys())} or not isinstance(value, str) for name, value in raw.items()):
+    if not isinstance(raw, dict) or not raw or any(name not in {k + '.csv' for k in (SCHEMA.keys() | V2_SCHEMA.keys() | REQUIREMENTS_SCHEMA.keys() | {'source_evidence'})} or not isinstance(value, str) for name, value in raw.items()):
         raise DataError(['取込原本の形式が不正'])
     return hashlib.sha256(json.dumps(raw, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
@@ -88,6 +89,7 @@ def validate_database(db):
         issue_events = set()
         events = 0
         catalog_revision,catalog_products=0,{}
+        jan_revision,jan_products=0,{}
         for event_id, at, kind, content in db.execute('SELECT * FROM events ORDER BY id'):
             stamp(at)
             payload = json.loads(content)
@@ -95,6 +97,21 @@ def validate_database(db):
                 raise DataError(['操作イベントの形式が不正'])
             if kind == 'import' and raw_digest(payload.get('raw')) != payload.get('digest'):
                 raise DataError(['取込イベントの原本ハッシュが不一致'])
+            if kind == 'jan_master_change':
+                from .jan_catalog import validate_jan
+                products=payload.get('products')
+                if not isinstance(products,list) or not products or any(not isinstance(p,dict) for p in products):raise DataError(['JAN・PLマスタの形式が不正'])
+                checked=[validate_jan(p) for p in products]
+                current={p['product']:p for p in checked}
+                after=payload.get('after');before=payload.get('before')
+                if (not checked or len(current)!=len(checked) or not isinstance(after,dict)
+                    or payload.get('base_revision')!=jan_revision or payload.get('acknowledged') is not True
+                    or not isinstance(payload.get('operator'),str) or not payload['operator'].strip()
+                    or not isinstance(payload.get('reason'),str) or not payload['reason'].strip()
+                    or current.get(after.get('product'))!=after or jan_products.get(after.get('product'))!=before
+                    or current!={**jan_products,after['product']:after}):
+                    raise DataError(['JAN・PLマスタ変更履歴が不整合'])
+                jan_revision,jan_products=event_id,current
             if kind == 'product_master_change':
                 from .catalog import validate_product
                 products=payload.get('products')

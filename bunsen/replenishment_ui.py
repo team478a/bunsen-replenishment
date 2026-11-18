@@ -11,10 +11,12 @@ from .shipping_output import write_documents
 from .legacy_ui import LegacyApp
 from .delivery_ui import DeliveryUI
 from .catalog_ui import CatalogUI
+from .jan_catalog_ui import JanCatalogUI
+from .requirements_data import active, line_units, NOTICE
 from .ui_theme import apply_theme, brand, section, table_scrollbars, text_panel, responsive_label, scroll_page
 
 
-class App(CatalogUI, DeliveryUI, LegacyApp):
+class App(JanCatalogUI, CatalogUI, DeliveryUI, LegacyApp):
     diagnostic_workflow=2
     def __init__(self, root, data_home=None):
         super().__init__(root,data_home)
@@ -64,10 +66,11 @@ class App(CatalogUI, DeliveryUI, LegacyApp):
         self.build_delivery_tab()
         self.build_product_master_tab()
         brand(self)
+        self.build_jan_tab()
         self.reason.trace_add('write',lambda *_:self.ack.set(False))
         self.allow_provisional.trace_add('write',lambda *_:self.invalidate())
         self.history();self.update_mode()
-        self.info.set('新方式のCSV一式（replenishment.csvを含む）を取り込んでください。サンプル値は業務承認済み設定ではありません。')
+        self.info.set('JAN・PL方式はrequirements.csvを含む一式を取り込んでください。入庫・輸送中は対象外。旧v2は従来計算として保持します。')
 
     def update_mode(self):
         super().update_mode()
@@ -110,13 +113,16 @@ class App(CatalogUI, DeliveryUI, LegacyApp):
         self.expiry_picker.configure(values=());self.expiry_product.set('');self.expiry_type.set('');self.expiry_days.set('')
         self.master_source_picker.configure(values=());self.master_source.set('')
         for var in self.setting_values.values():var.set('')
-        data=(self.service.import_folder(folder,workflow=2,use_registered_products=True) if self.use_registered_master.get()
+        data=(self.service.import_folder(folder,workflow=2,use_registered_jan=True) if self.use_registered_jan.get() else
+              self.service.import_folder(folder,workflow=2,use_registered_products=True) if self.use_registered_master.get()
               else self.service.import_folder(folder,workflow=2))
         if data.workflow != 2:raise DataError(['旧形式CSVは履歴用です。新方式のreplenishment.csvを含む一式を指定してください'])
         self.data=data;self.folder=folder
-        source=f'登録商品マスタ版{data.product_master_revision}' if data.product_master_revision is not None else 'CSV商品マスタ'
-        self.info.set(f'取込済み: {folder} / {source} / データ識別 {data.digest[:16]}。ブンセン在庫は使用しません。')
-        self.display_settings();self.show('取込完了。分析・補充計算を実行してください。')
+        source=(f'登録JAN・PLマスタ版{data.jan_master_revision}' if data.jan_master_revision is not None else
+                f'登録商品マスタ版{data.product_master_revision}' if data.product_master_revision is not None else 'CSV商品マスタ')
+        self.tree.heading('units',text='物理PL' if active(data) else 'PL＋甲')
+        self.info.set(f'{"JAN・物理PL／入庫対象外" if active(data) else "旧v2／確定入庫反映"} 取込済み: {folder} / {source} / データ識別 {data.digest[:16]}。ブンセン在庫は使用しません。')
+        self.display_settings();self.show(('JAN・PL方式: '+NOTICE+'\n' if active(data) else '旧v2: 確定入庫を反映する計算です。\n')+'取込完了。分析・補充計算を実行してください。')
 
     def invalidate(self,keep_draft=False):
         self.invalidate_delivery()
@@ -127,6 +133,7 @@ class App(CatalogUI, DeliveryUI, LegacyApp):
     def display_settings(self):
         if not hasattr(self,'setting_picker') or self.data is None:return
         self.refresh_product_master()
+        self.refresh_jan_master()
         options=[r['warehouse']+' | '+r['product'] for r in self.data.tables['replenishment']]
         self.expiry_picker.configure(values=[r['product'] for r in self.data.tables['products']])
         self.expiry_product.set(self.data.tables['products'][0]['product']);self.select_expiry()
@@ -178,17 +185,18 @@ class App(CatalogUI, DeliveryUI, LegacyApp):
         self.tree.delete(*self.tree.get_children())
         products={r['product']:r for r in self.data.tables['products']}
         for i,r in enumerate(self.lines):
-            self.tree.insert('','end',iid=str(i),tags=('attention' if r['warning'] or r['quantity_p']<r['required_p'] else ('alternate' if i%2 else ''),),values=(LABELS[r['warehouse']],r['product']+' '+products[r['product']]['name'],r['inventory_p'],r['demand_p'],r['safety_p'],r['required_p'],r['suggested_p'],r['quantity_p'],r['quantity_p'] if self.finalized else '未確定',units(r['quantity_p'],products[r['product']]),r['arrival']))
+            self.tree.insert('','end',iid=str(i),tags=('attention' if r['warning'] or r['quantity_p']<r['required_p'] else ('alternate' if i%2 else ''),),values=(LABELS[r['warehouse']],r['product']+' '+products[r['product']]['name'],r['inventory_p'],r['demand_p'],r['safety_p'],r['required_p'],r['suggested_p'],r['quantity_p'],r['quantity_p'] if self.finalized else '未確定',line_units(r,products[r['product']]),r['arrival']))
         errors=validate(self.data,self.lines,self.dispatch,self.service.clock())
         state='正式確定済み' if self.finalized else '未確定'
         warnings=sum(bool(r['warning']) or r['quantity_p']<r['required_p'] for r in self.lines)
         self.result_status.set(f'{state}  /  {len(self.lines)}明細  /  検証不備 {len(errors)}件  /  注意明細 {warnings}件（根拠欄を確認）')
         evidence=[]
         for row in self.lines:
-            evidence.append(f'{LABELS[row["warehouse"]]} {row["product"]}: 在庫基準 {row["inventory_as_of"]} ({row["inventory_basis"]}) / 入庫網羅 {row["transit_checked_at"]} / 予測基準 {row["forecast_as_of"]}\n{row["warning"]}')
-            evidence.extend(f'{r["date"]}: 始業予測 {r["opening_p"]}P + 確定入庫 {r["transit_p"]}P - 需要予測 {r["forecast_p"]}P = 補充前予測 {r["projected_closing_p"]}P / 安全在庫 {r["safety_p"]}P' for r in row['timeline'])
+            if row.get('source_pdf'):evidence.append(f'在庫PDF {row["source_pdf"]} / SHA-256 {row["source_sha256"]} / 転記確認者 {row["inventory_checker"]}')
+            evidence.append(f'{LABELS[row["warehouse"]]} {row["product"]}: 在庫基準 {row["inventory_as_of"]} ({row["inventory_basis"]}) / 入庫網羅 {row['transit_checked_at'] if row['transit_checked_at'] is not None else '対象外'} / 予測基準 {row["forecast_as_of"]}\n{row["warning"]}')
+            evidence.extend(f'{r["date"]}: 始業予測 {r["opening_p"]}P + 確定入庫 {str(r['transit_p'])+'P' if r['transit_p'] is not None else '対象外'} - 需要予測 {r["forecast_p"]}P = 補充前予測 {r["projected_closing_p"]}P / 安全在庫 {r["safety_p"]}P' for r in row['timeline'])
             if row['quantity_p'] < row['required_p']:evidence.append('修正後も安全在庫未達のリスクがあります。理由と数量を確認してください。')
-        self.show('\n'.join(['必要補充の指示であり実出荷実績ではありません。']+evidence+['確定前検証']+(errors or ['入力検証に不備なし。担当者の確認操作が必要です。'])))
+        self.show('\n'.join([NOTICE if active(self.data) else '必要補充の指示であり実出荷実績ではありません。']+evidence+['確定前検証']+(errors or ['入力検証に不備なし。担当者の確認操作が必要です。'])))
 
     def selected(self,_event=None):
         if self.lines and self.tree.selection():
@@ -235,6 +243,7 @@ class App(CatalogUI, DeliveryUI, LegacyApp):
         super().history()
         self.refresh_delivery_history()
         self.refresh_product_master()
+        self.refresh_jan_master()
 
     def save_mapping_template(self):
         from .diagnostics import export_template

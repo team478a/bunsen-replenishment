@@ -14,13 +14,15 @@ from pathlib import Path
 from .core import DataError, LABELS, WAREHOUSES, allocations, calculate, load, now_jst, units, validate, stamp
 from .planning import compare, comparison_text, overlay
 from .catalog import CatalogService, catalog_csv
+from .jan_catalog import JanCatalog, master_csvs
+from .requirements_data import active, PROFILE, NOTICE
 
 
 def encode(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
-class Service(CatalogService):
+class Service(JanCatalog, CatalogService):
     def __init__(self, db_path, clock=now_jst):
         self.clock = clock
         self.db_path = Path(db_path).resolve()
@@ -72,17 +74,25 @@ class Service(CatalogService):
             self.db.execute('INSERT INTO events(at,kind,payload) VALUES(?,?,?)',
                             (self.clock().isoformat(), kind, encode(payload)))
 
-    def import_folder(self, folder, *, workflow=None, use_registered_products=False):
+    def import_folder(self, folder, *, workflow=None, use_registered_products=False, use_registered_jan=False):
         self.ensure_writable()
         try:
-            if workflow == 2 and not (Path(folder)/'replenishment.csv').is_file():
+            if workflow == 2 and not any((Path(folder)/name).is_file() for name in ('replenishment.csv','requirements.csv')):
                 raise DataError(['replenishment.csv: 新方式の補充条件CSVが必要です。旧入力は履歴用です'])
-            state=None
+            state=None;jan_state=None
             if use_registered_products:
                 if workflow != 2:raise DataError(['登録商品マスタは新方式の取込で使用してください'])
                 state=self.product_master()
                 if not state['products']:raise DataError(['登録商品マスタがありません。商品マスタ画面で確認登録してください'])
-            data = (load(folder,self.clock(),workflow=workflow,product_csv=catalog_csv(state['products']))
+            if use_registered_jan:
+                if use_registered_products or not (Path(folder)/'requirements.csv').is_file():raise DataError(['JANマスタはrequirements.csv方式で使用してください'])
+                jan_state=self.jan_master()
+                if not jan_state['products']:raise DataError(['JAN・PLマスタがありません'])
+                from .requirements_data import inspect
+                checked=inspect(folder,self.clock(),master_csvs(jan_state['products']))
+                if checked.issues:raise DataError(checked.issues)
+                data=checked.dataset;data.jan_master_revision=jan_state['revision'];self.assert_jan_current(data)
+            else:data = (load(folder,self.clock(),workflow=workflow,product_csv=catalog_csv(state['products']))
                     if state else load(folder,self.clock(),workflow=workflow))
             if state:
                 data.product_master_revision=state['revision']
@@ -94,6 +104,7 @@ class Service(CatalogService):
             raise
         payload={'digest': data.digest, 'raw': data.raw}
         if state:payload['product_master_revision']=state['revision']
+        if jan_state:payload['jan_master_revision']=jan_state['revision']
         self.event('import', payload)
         return data
 
@@ -103,6 +114,7 @@ class Service(CatalogService):
         lines = calculate(data, dispatch, allow_provisional=allow_provisional)
         payload={'digest': data.digest, 'dispatch': dispatch.isoformat(), 'lines': lines}
         if data.product_master_revision is not None:payload['product_master_revision']=data.product_master_revision
+        if data.jan_master_revision is not None:payload['jan_master_revision']=data.jan_master_revision
         self.event('calculate', payload)
         return lines
 
@@ -115,7 +127,7 @@ class Service(CatalogService):
         if row is None:
             raise DataError(['修正対象がありません'])
         if quantity % row['unit_p']:
-            raise DataError(['指示数量は商品マスタの甲単位にしてください（自動補正しません）'])
+            raise DataError(['指示数量は計算行の出荷単位にしてください（JAN方式は物理PLのみ）'])
         before = copy.deepcopy(row)
         after = dict(row,quantity_p=quantity,edit_reason=reason.strip())
         self.event('edit',dict(digest=data.digest,before=before,after=after,operator=operator.strip(),reason=reason.strip()))
@@ -138,9 +150,10 @@ class Service(CatalogService):
         stream = io.StringIO(newline='')
         writer = csv.DictWriter(stream,fieldnames=list(row),lineterminator='\n')
         writer.writeheader(); writer.writerows(rows)
-        raw = dict(data.raw,**{'replenishment.csv':stream.getvalue()})
+        raw = dict(data.raw,**{('requirements.csv' if active(data) else 'replenishment.csv'):stream.getvalue()})
         fresh = self.snapshot_data(raw)
         fresh.product_master_revision=data.product_master_revision
+        fresh.jan_master_revision=data.jan_master_revision
         self.event('settings_change',dict(before=before,after=row,reason=reason.strip(),operator=operator.strip(),
                                          before_digest=data.digest,digest=fresh.digest,raw=fresh.raw))
         return fresh
@@ -152,6 +165,7 @@ class Service(CatalogService):
     def update_product_expiry(self, data, product, expiry_type, shelf_life_days, reason, operator):
         self.ensure_writable()
         self.assert_product_master_current(data)
+        if data.jan_master_revision is not None:raise DataError(['登録JANの期限変更はJAN・PLマスタ画面で保存し再取込してください'])
         if data.workflow != 2 or expiry_type not in ('best_before','use_by') or type(shelf_life_days) is not int or shelf_life_days <= 0 or not reason.strip() or not operator.strip():
             raise DataError(['期限マスタには種別・正整数日数・確認理由・担当者が必要です'])
         reader = csv.DictReader(io.StringIO(data.raw['products.csv']))
@@ -182,6 +196,7 @@ class Service(CatalogService):
         report=build_plan(fresh,start,self.clock(),allow_provisional=allow_provisional)
         report.update(plan_id='DP-'+uuid.uuid4().hex,trial_only=self.trial_only)
         if data.product_master_revision is not None:report['product_master_revision']=data.product_master_revision
+        if data.jan_master_revision is not None:report['jan_master_revision']=data.jan_master_revision
         self.event('delivery_plan',dict(report=report,raw=fresh.raw))
         return report
 
@@ -211,6 +226,7 @@ class Service(CatalogService):
                         if json.loads(r[0])['report']['plan_id']==plan_id),None)
             if saved is None:raise DataError(['配送計画の原本がありません'])
             report=saved['report']
+            if report.get('jan_master_revision') is not None and report['jan_master_revision']!=self.jan_master()['revision']:raise DataError(['JAN・PLマスタが更新されています。配送計画を再計算してください'])
             if report.get('product_master_revision') is not None and report['product_master_revision']!=self.product_master()['revision']:
                 raise DataError(['登録商品マスタが変更されています。配送計画を再取込・再計算・再確認してください'])
             if date.fromisoformat(report['start']) < stamp(self.clock().isoformat()).date():
@@ -249,6 +265,7 @@ class Service(CatalogService):
     def resume_draft(self, number):
         self.ensure_writable()
         draft = self.draft(number)
+        if draft.get('profile')==PROFILE:raise DataError(['JAN・PL方式の参考指示は保存原本の閲覧・出力用です。修正は再取込・再計算してください'])
         data = self.snapshot_data(draft['raw'], draft['digest'])
         data.product_master_revision=draft.get('product_master_revision')
         self.assert_product_master_current(data)
@@ -299,6 +316,8 @@ class Service(CatalogService):
                    'validation': errors, 'dispatch': dispatch.isoformat(), 'at': at}
         if fresh.workflow == 2:
             payload.update(workflow=2,meaning='replenishment_instruction_not_shipment_actual',settings=fresh.tables['replenishment'])
+            if active(fresh):payload.update(profile=PROFILE,inbound_scope='excluded',notice=NOTICE)
+            if data.jan_master_revision is not None:payload['jan_master_revision']=data.jan_master_revision
             if data.product_master_revision is not None:payload['product_master_revision']=data.product_master_revision
         if reference:
             payload['source_draft'] = reference

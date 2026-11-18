@@ -8,12 +8,15 @@ from xml.etree import ElementTree as ET
 from zipfile import ZipFile, ZIP_DEFLATED
 
 from .core import DataError, LABELS, case_p
+from .requirements_data import PROFILE, NOTICE
 
 HEADERS = ['商品','品名','現在庫P','対象予測P','安全P(最大)','必要P','換算後P','修正P','確定P','PL','甲','修正理由','到着日']
 
 
 def notice(payload):
     parts = ['必要補充数量の指示です。実出荷実績・ブンセンの供給可能在庫を示しません。']
+    if payload.get('profile')==PROFILE:parts.append(NOTICE)
+    if payload.get('jan_master_revision') is not None:parts.append(f'JAN・PLマスタ版 {payload["jan_master_revision"]}')
     if payload.get('product_master_revision') is not None:
         parts.append(f'登録商品マスタ版 {payload["product_master_revision"]}（発行時の保存原本）。')
     if payload.get('trial_only'):
@@ -39,8 +42,11 @@ def rows(payload, warehouse):
         if row['warehouse'] != warehouse:
             continue
         product = products[row['product']]
-        cases = row['quantity_p']//case_p(product)
-        pl, remainder = divmod(cases,product['cases_per_pl'])
+        if row.get('rounding')=='ceil_physical_pl':
+            pl,remainder=row['quantity_p']//row['unit_p'],None
+        else:
+            cases = row['quantity_p']//case_p(product)
+            pl, remainder = divmod(cases,product['cases_per_pl'])
         result.append([row['product'],product['name'],row['inventory_p'],row['demand_p'],row['safety_p'],
                        row['required_p'],row['suggested_p'],row['quantity_p'] if row['edit_reason'].strip() else None,
                        row['quantity_p'] if payload['formal'] else None,pl,remainder,row['edit_reason'],row['arrival']])
@@ -54,7 +60,7 @@ def title(payload, warehouse):
 def report_html(payload, warehouse):
     esc = lambda v: html.escape(str(v) if v is not None else '',quote=True)
     table = ''.join('<tr>'+''.join('<td>'+esc(v)+'</td>' for v in row)+'</tr>' for row in rows(payload,warehouse))
-    basis = '\n'.join(f'{r["product"]}: 在庫基準 {r["inventory_as_of"]} ({r["inventory_basis"]}) / 入庫網羅確認 {r["transit_checked_at"]} / 予測基準 {r["forecast_as_of"]} / 設定 {r["settings"]} / {r["warning"]}' for r in payload['lines'] if r['warehouse']==warehouse)
+    basis = '\n'.join(f'{r["product"]}: 在庫基準 {r["inventory_as_of"]} ({r["inventory_basis"]}) / 入庫網羅確認 {r["transit_checked_at"] if r["transit_checked_at"] is not None else "対象外"} / 予測基準 {r["forecast_as_of"]} / 設定 {r["settings"]} / {r["warning"]}' for r in payload['lines'] if r['warehouse']==warehouse)
     return f'''<!doctype html><html lang="ja"><meta charset="utf-8"><title>{esc(title(payload,warehouse))}</title>
 <style>body{{font-family:Meiryo,sans-serif;margin:24px}}table{{border-collapse:collapse;width:100%;font-size:12px}}td,th{{border:1px solid #888;padding:6px;overflow-wrap:anywhere}}.notice{{border:3px solid #a54000;padding:10px}}pre{{white-space:pre-wrap}}@media print{{button{{display:none}}thead{{display:table-header-group}}}}</style>
 <h1>{esc(title(payload,warehouse))}</h1><p class="notice">{esc(notice(payload))}</p>
@@ -70,7 +76,8 @@ def xlsx_bytes(payload, warehouse):
     grid += [[],['データ識別',payload['digest']],['発行日時',payload['at']]]
     for line in payload['lines']:
         if line['warehouse']==warehouse:
-            grid += [[line['product'],'在庫基準',line['inventory_as_of'],'入庫網羅確認',line['transit_checked_at']],
+            if line.get('source_pdf'):grid += [['在庫PDF',line['source_pdf'],'SHA-256',line['source_sha256'],'転記確認者',line['inventory_checker']]]
+            grid += [[line['product'],'在庫基準',line['inventory_as_of'],'入庫網羅確認',line['transit_checked_at'] if line['transit_checked_at'] is not None else '対象外'],
                      ['予測基準',', '.join(line['forecast_as_of'])],['警告',line['warning']]]
     return xlsx_grid_bytes(grid)
 
@@ -148,10 +155,11 @@ def pdf_bytes(payload, warehouse):
     story += [table,Spacer(1,12),para('根拠・警告（予測は確定在庫ではありません）')]
     for line in payload['lines']:
         if line['warehouse']==warehouse:
+            if line.get('source_pdf'):story += [para(f'在庫PDF {line["source_pdf"]} / SHA-256 {line["source_sha256"]} / 転記確認者 {line["inventory_checker"]}')]
             settings=line['settings']
             basis='始業在庫' if line['inventory_basis']=='opening' else '終業在庫'
             story += [para(f'{line["product"]}: 現在庫 {line["inventory_p"]}P / 対象需要予測 {line["demand_p"]}P / 安全在庫(最大) {line["safety_p"]}P'),
-                      para(f'在庫基準 {line["inventory_as_of"]} ({basis}) / 入庫網羅確認 {line["transit_checked_at"]}'),
+                      para(f'在庫基準 {line["inventory_as_of"]} ({basis}) / 入庫網羅確認 {line["transit_checked_at"] if line["transit_checked_at"] is not None else "対象外"}'),
                       para('予測基準 '+', '.join(line['forecast_as_of'])),
                       para(f'補充サイクル {settings["cycle_days"]}日 / 配送 {settings["lead_days"]}日 / 安全在庫 {settings["safety_days"]}日分 / 対象 {settings["coverage_days"]}日 / {line["warning"]}'),Spacer(1,6)]
     story += [para('実ロット・期限・積載確認と実出荷登録は別業務。必要数量の確定は供給・実出荷を保証しません。')]

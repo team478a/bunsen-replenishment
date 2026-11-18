@@ -81,6 +81,7 @@ class Dataset:
     locations: dict = field(default_factory=dict)
     workflow: int = 0
     product_master_revision: int | None = None
+    jan_master_revision: int | None = None
 
 
 def now_jst():
@@ -94,13 +95,13 @@ def stamp(value):
     return result.astimezone(JST)
 
 
-def inspect_folder(folder, now=None, *, workflow=None, product_csv=None):
+def inspect_folder(folder, now=None, *, workflow=None, product_csv=None, master_csvs=None):
     from .ingest import inspect_folder as inspect
-    return inspect(folder, now or now_jst(),workflow=workflow,product_csv=product_csv)
+    return inspect(folder, now or now_jst(),workflow=workflow,product_csv=product_csv,master_csvs=master_csvs)
 
 
-def load(folder, now=None, *, workflow=None, product_csv=None):
-    inspection = inspect_folder(folder, now,workflow=workflow,product_csv=product_csv)
+def load(folder, now=None, *, workflow=None, product_csv=None, master_csvs=None):
+    inspection = inspect_folder(folder, now,workflow=workflow,product_csv=product_csv,master_csvs=master_csvs)
     if inspection.issues:
         raise DataError(inspection.issues)
     return inspection.dataset
