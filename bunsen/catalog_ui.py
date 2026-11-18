@@ -55,7 +55,7 @@ class CatalogUI:
         self.master_status=tk.StringVar();ttk.Label(self.master_tab,textvariable=self.master_status,wraplength=1080).pack(anchor='w')
         ttk.Label(self.master_tab,text='コードは編集で変更しません。別コードは新商品で登録。削除や旧履歴の書換えは行いません。新商品には両倉庫の在庫・予測・補充条件等の整備が必要です。',wraplength=1080).pack(anchor='w',pady=5)
         self.use_registered_master=tk.BooleanVar(value=False)
-        mode=ttk.Frame(self.daily);mode.pack(fill='x',before=self.tree.master,pady=4)
+        mode=ttk.Frame(self.daily);self.legacy_master_mode=mode;mode.pack(fill='x',before=self.tree.master,pady=4)
         ttk.Checkbutton(mode,text='旧v2登録商品マスタを使う（従来の入庫反映・甲換算方式のみ）',variable=self.use_registered_master).pack(anchor='w')
         self.use_registered_master.trace_add('write',self.master_mode_changed)
         self.refresh_product_master(force=True)
