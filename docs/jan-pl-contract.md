@@ -30,7 +30,7 @@ confirmedはyesのみ。欠損・未確認を0補完しない。商品期限はb
 3. 神戸/杉戸それぞれの報告PDF、在庫基準日時、始業/終業、転記確認者を指定し新規保存先を選ぶ。
 4. inventory.csvとsource_evidence.csvを生成。数量とconfirmedは空欄のため、そのままでは取り込めない。
 5. 原本PDFと照合しJANごとのquantity_pを転記。実際に0の場合も0を明記し、確認できた行のみconfirmed=yesとする。商品が載っていないだけで0にしない。
-6. products/pallets/forecast/requirementsと同じフォルダーに配置し取込。登録JANマスタを使う場合は対応チェックを選択するとproducts/palletsを置換する。旧v2登録マスタは併用しない。
+6. products/pallets/forecast/requirementsと同じフォルダーに配置し取込。products/palletsが両方ない場合だけ登録JANマスタを自動使用する。片方だけの欠損は停止する。旧v2登録マスタは併用しない。日常操作は[簡素化後の操作仕様](simple-ui.md)を参照。
 
 PDFは自動抽出しない。20MB以下のPDF原本のバイト列をSHA-256とbase64で証跡CSVへ格納し、DB保存原本に保持する。既存の証跡CSVがなくても、inventoryのsource_pdfに指定された同フォルダーのPDF原本を読み保存できる。両方ある場合は一致を確認。source_sha256・checker・基準日時・数量・確認区分は必須。証跡はファイル同一性を確認するものであり、転記値と原本内容の業務上の一致は担当者が確認する。
 
