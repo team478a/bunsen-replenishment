@@ -6,6 +6,7 @@ from tkinter import ttk, filedialog
 
 from .core import DataError, LABELS, units
 from .delivery import NOTICE
+from .requirements_data import line_units, PROFILE
 from .delivery_output import export_plan
 from .ui_theme import section, table_scrollbars, text_panel, responsive_label, scroll_page
 
@@ -64,10 +65,10 @@ class DeliveryUI:
         products={p['product']:p for p in r['products']}
         for trip in r['trips']:
             for item in trip['items']:
-                self.delivery_tree.insert('','end',values=(trip['trip_id'],LABELS[trip['warehouse']],item['dispatch'],item['arrival'],item['product']+' '+item['name'],item['quantity_p'],item['pallets'],item['estimated_expiry'],item['remaining_arrival_days'],units(item['quantity_p'],products[item['product']])))
+                self.delivery_tree.insert('','end',values=(trip['trip_id'],LABELS[trip['warehouse']],item['dispatch'],item['arrival'],item['product']+' '+item['name'],item['quantity_p'],item['pallets'],item['estimated_expiry'],item['remaining_arrival_days'],line_units(item,products[item['product']])))
         text=[('正式配送予定' if r['formal'] else '未確定・参考計画')+' / '+r['plan_id'],
               '計算実行日時 '+r['calculated_at']+' / 固定した仮製造日 '+r['assumed_manufacture_date'],NOTICE,
-              '16PL枠以下・1PL1商品。甲端数も1枠使用。重量・容積・休日・大域最適性は未確認。']
+              ('16物理PL以下・1PL1JAN・PL未満出荷なし。重量・容積・休日・大域最適性は未確認。' if r.get('profile')==PROFILE else '16PL枠以下・1PL1商品。甲端数も1枠使用。重量・容積・休日・大域最適性は未確認。')]
         text+=r['warnings'] or ['参考警告なし（実期限の適合確認ではありません）']
         if r.get('product_master_revision') is not None:text.insert(2,f'登録商品マスタ版 {r["product_master_revision"]}（計算時の保存原本）')
         text += [f'{v["warehouse"]} {v["product"]}: 在庫基準 {v["as_of"]} ({v["basis"]})' for v in r['inventory_basis']]

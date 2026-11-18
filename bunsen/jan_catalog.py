@@ -1,0 +1,54 @@
+"""Explicitly confirmed JAN masters with warehouse-specific physical pallets."""
+import json
+from .core import DataError
+from .requirements_data import SCHEMA, csv_text
+
+FIELDS=('product','name','expiry_type','shelf_life_days','kobe_p_per_pl','sugito_p_per_pl')
+
+
+def validate_jan(values):
+    if not isinstance(values,dict) or set(values)!=set(FIELDS):raise DataError(['JANマスタ項目が一致しません'])
+    result=dict(values)
+    jan=result['product']
+    if not isinstance(jan,str) or not jan.isascii() or not jan.isdecimal() or len(jan)!=13:raise DataError(['JANは13桁の文字列です'])
+    if not isinstance(result['name'],str) or not result['name'].strip() or any(ord(c)<32 for c in result['name']):raise DataError(['品名を確認してください'])
+    result['name']=result['name'].strip()
+    if result['expiry_type'] not in ('best_before','use_by'):raise DataError(['期限の種別を確認してください'])
+    for field in FIELDS[3:]:
+        if type(result[field]) is not int or result[field]<=0:raise DataError([field+': 確認済みの正整数が必要です'])
+    return result
+
+
+def master_csvs(products):
+    goods=[];pallets=[]
+    for p in products:
+        validate_jan(p)
+        goods.append(dict(product=p['product'],name=p['name'],expiry_type=p['expiry_type'],shelf_life_days=p['shelf_life_days'],confirmed='yes'))
+        for warehouse,key in [('KOBE','kobe_p_per_pl'),('SUGITO','sugito_p_per_pl')]:
+            pallets.append(dict(warehouse=warehouse,product=p['product'],p_per_pl=p[key],confirmed='yes'))
+    return {'products.csv':csv_text(SCHEMA['products'],goods),'pallets.csv':csv_text(SCHEMA['pallets'],pallets)}
+
+
+class JanCatalog:
+    def jan_master(self):
+        row=self.db.execute("SELECT id,payload FROM events WHERE kind='jan_master_change' ORDER BY id DESC LIMIT 1").fetchone()
+        return dict(revision=row[0],products=json.loads(row[1])['products']) if row else dict(revision=0,products=[])
+
+    def save_jan_master(self,values,operator,reason,acknowledged,expected_revision,create):
+        from .service import encode
+        self.ensure_writable();p=validate_jan(values)
+        if not isinstance(operator,str) or not operator.strip() or not isinstance(reason,str) or not reason.strip() or acknowledged is not True:
+            raise DataError(['担当者・変更根拠・明示確認が必要です'])
+        with self.db:
+            self.db.execute('BEGIN IMMEDIATE');state=self.jan_master()
+            if type(expected_revision) is not int or state['revision']!=expected_revision:raise DataError(['JANマスタが更新されています。最新の一覧を再表示してください'])
+            before=next((x for x in state['products'] if x['product']==p['product']),None)
+            if type(create) is not bool or (create and before is not None) or (not create and before is None):raise DataError(['JANの重複または編集対象なし'])
+            products=sorted([x for x in state['products'] if x['product']!=p['product']]+[p],key=lambda x:x['product'])
+            payload=dict(products=products,before=before,after=p,base_revision=state['revision'],operator=operator.strip(),reason=reason.strip(),acknowledged=True)
+            cur=self.db.execute('INSERT INTO events(at,kind,payload) VALUES(?,?,?)',(self.clock().isoformat(),'jan_master_change',encode(payload)))
+        return dict(revision=cur.lastrowid,products=products)
+
+    def assert_jan_current(self,data):
+        rev=getattr(data,'jan_master_revision',None)
+        if rev is not None and (type(rev) is not int or rev!=self.jan_master()['revision']):raise DataError(['JAN・倉庫別PLマスタが更新されています。再取込・再計算・再確認してください'])

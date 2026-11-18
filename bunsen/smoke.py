@@ -130,6 +130,8 @@ def run_smoke(output):
         checks.append('delivery_14day_estimated_expiry')
         checks.append('many_product_print_readiness')
         checks.append('product_master_registration')
+        run_jan_smoke(home)
+        checks.append('jan_physical_pl_pdf_inventory')
     result = dict(version=__version__, frozen=bool(getattr(sys, 'frozen', False)),
                   executable=Path(sys.executable).name, checks=checks, success=True)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -205,6 +207,37 @@ def run_v2_smoke(home):
         assert payload['tables']['products'][0]['name']=='架空画面登録そうめん'
         assert len(write_documents(payload,target/'master-reports'))==6
         current.service.export_product_master(target/'registered-products.csv')
+    finally:
+        if current is not None:current.close()
+        else:root.destroy()
+
+
+def run_jan_smoke(target):
+    from .ui import App as CurrentApp
+    from .jan_demo import create_kit as jan_kit
+    from .shipping_output import write_documents
+    from .delivery_output import export_plan
+    day=datetime(2026,11,9).date();kit=jan_kit(target/'jan-kit',day)
+    root=tk.Tk();root.withdraw();current=None
+    try:
+        current=CurrentApp(root,kit/'home')
+        current.service.clock=lambda:datetime(2026,11,9,9,tzinfo=JST)
+        current.day.set(str(day))
+        values=dict(product='4900000000001',name='架空登録JAN',expiry_type='賞味期限',shelf_life_days='10',kobe_p_per_pl='240',sugito_p_per_pl='480')
+        for key,value in values.items():current.jan_values[key].set(value)
+        current.jan_operator.set('架空担当');current.jan_reason.set('架空PL確認');current.jan_ack.set(True);current.save_jan()
+        current.use_registered_jan.set(True)
+        current.data=current.service.import_folder(kit/'csv',workflow=2,use_registered_jan=True)
+        current.operator.set('架空担当');current.compute()
+        assert [r['quantity_p'] for r in current.lines]==[240,480]
+        assert '物理' in current.tree.item('0','values')[9]
+        current.tree.selection_set('0');current.selected();current.qty.set('480');current.reason.set('架空2PL');current.edit()
+        current.ack.set(True);current.issue(True)
+        assert len(write_documents(current.service.report_payload(current.last_number),kit/'reports'))==6
+        current.compute_delivery();current.delivery_ack.set(True);current.confirm_delivery()
+        assert current.delivery_report['confirmed_inbound'] is None
+        assert len(export_plan(current.delivery_report,kit/'plans'))==7
+        assert diagnose(kit/'csv',day,current.service.clock(),workflow=2,**current.diagnostic_product_master())['calculation_possible']
     finally:
         if current is not None:current.close()
         else:root.destroy()

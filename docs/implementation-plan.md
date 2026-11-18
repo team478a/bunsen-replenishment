@@ -1,3 +1,5 @@
+JAN・物理PL方式の追加計画は [jan-pl-plan.md](jan-pl-plan.md)、契約・操作は [jan-pl-contract.md](jan-pl-contract.md)。以下は従来実装の計画記録。
+
 ## 現行改修
 
 2026-11-14のムロオ必要補充方式への調査・計画・仕様変更を優先する。[v2改修計画](replenishment-v2-plan.md)参照。以下は旧方式開発の履歴で、朝照合・供給在庫の条件を新規業務へ適用しない。

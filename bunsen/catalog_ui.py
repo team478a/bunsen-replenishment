@@ -56,7 +56,7 @@ class CatalogUI:
         ttk.Label(self.master_tab,text='コードは編集で変更しません。別コードは新商品で登録。削除や旧履歴の書換えは行いません。新商品には両倉庫の在庫・予測・補充条件等の整備が必要です。',wraplength=1080).pack(anchor='w',pady=5)
         self.use_registered_master=tk.BooleanVar(value=False)
         mode=ttk.Frame(self.daily);mode.pack(fill='x',before=self.tree.master,pady=4)
-        ttk.Checkbutton(mode,text='登録商品マスタを使う（取込時にCSV商品マスタを置換・未登録/不足データは停止）',variable=self.use_registered_master).pack(anchor='w')
+        ttk.Checkbutton(mode,text='旧v2登録商品マスタを使う（従来の入庫反映・甲換算方式のみ）',variable=self.use_registered_master).pack(anchor='w')
         self.use_registered_master.trace_add('write',self.master_mode_changed)
         self.refresh_product_master(force=True)
 
@@ -69,10 +69,16 @@ class CatalogUI:
         else:self.master_units.set('換算未確認（3つの換算数を確認して入力してください）')
 
     def master_mode_changed(self,*_):
+        if self.use_registered_master.get() and hasattr(self,'use_registered_jan'):self.use_registered_jan.set(False)
         self.invalidate();self.invalidate_diagnostic();self.data=None
         self.info.set('商品マスタの使用元が変わりました。CSVを再取込・再計算してください。')
 
     def diagnostic_product_master(self):
+        if getattr(self,'use_registered_jan',None) is not None and self.use_registered_jan.get():
+            from .jan_catalog import master_csvs
+            state=self.service.jan_master()
+            if not state['products']:raise DataError(['登録JANマスタがありません'])
+            return dict(master_csvs=master_csvs(state['products']),jan_master_revision=state['revision'])
         if not self.use_registered_master.get():return {}
         state=self.service.product_master()
         if not state['products']:raise DataError(['登録商品マスタがありません。商品マスタ画面で確認登録してください'])

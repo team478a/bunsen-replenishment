@@ -25,12 +25,12 @@ LIMITATIONS = [
 ]
 
 
-def diagnose(folder, dispatch, now=None, *, workflow=None, product_csv=None, product_master_revision=None):
+def diagnose(folder, dispatch, now=None, *, workflow=None, product_csv=None, product_master_revision=None, master_csvs=None, jan_master_revision=None):
     now = now or now_jst()
-    inspection = inspect_folder(folder, now,workflow=workflow,product_csv=product_csv)
+    inspection = inspect_folder(folder, now,workflow=workflow,product_csv=product_csv,master_csvs=master_csvs)
     issues = list(inspection.issues)
     skipped = list(inspection.skipped_checks)
-    v2 = any(f['filename']=='replenishment.csv' for f in inspection.files)
+    v2 = any(f['filename'] in ('replenishment.csv','requirements.csv') for f in inspection.files)
     calculation_checked, calculation_possible, morning_checked = False, False, False
     warnings = []
     if inspection.dataset is not None:
@@ -52,7 +52,7 @@ def diagnose(folder, dispatch, now=None, *, workflow=None, product_csv=None, pro
         skipped.append('新方式ではブンセン在庫・朝照合は対象外です' if v2 else '朝現物在庫条件チェック（入力不備のため未実施）')
     files = inspection.files
     fingerprint = hashlib.sha256(json.dumps([(f['filename'], f['exists'], f['sha256']) for f in files], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
-    report=dict(format='bunsen-csv-diagnostic', version=1, schema='v2-provisional-contract' if v2 else 'v0-provisional',
+    report=dict(format='bunsen-csv-diagnostic', version=1, schema='jan-physical-pl-no-inbound' if any(f['filename']=='requirements.csv' for f in files) else ('v2-provisional-contract' if v2 else 'v0-provisional'),
                 checked_at=now.isoformat(), input_folder=str(Path(folder).resolve()),
                 dispatch=dispatch.isoformat(), input_fingerprint=fingerprint,
                 dataset_digest=inspection.dataset.digest if inspection.dataset else None,

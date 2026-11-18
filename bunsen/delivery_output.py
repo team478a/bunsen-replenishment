@@ -6,12 +6,15 @@ from pathlib import Path
 
 from .core import DataError, LABELS, units
 from .shipping_output import xlsx_grid_bytes
+from .requirements_data import line_units, PROFILE, NOTICE
 
 HEADERS = ['便','出荷日','入荷日','商品','品名','数量P','PL枠','期限種別','概算期限','出荷残日','入荷残日','数量換算']
 
 
 def plan_notice(report):
     parts = [report['notice'], '正式配送予定' if report['formal'] else '参考・未確定配送計画（正式使用不可）']
+    if report.get('profile')==PROFILE:parts.append(NOTICE)
+    if report.get('jan_master_revision') is not None:parts.append(f'JAN・PLマスタ版 {report["jan_master_revision"]}')
     if report.get('product_master_revision') is not None:parts.append(f'登録商品マスタ版 {report["product_master_revision"]}（計算時の保存原本）')
     if report.get('trial_only'):parts.append('架空試用・実出荷不可')
     if report.get('restored_view'):parts.append('復元参考・実出荷不可')
@@ -21,7 +24,7 @@ def plan_notice(report):
 def grid_rows(report, warehouse):
     products={p['product']:p for p in report['products']}
     return [[trip['trip_id'],item['dispatch'],item['arrival'],item['product'],item['name'],item['quantity_p'],item['pallets'],
-             '賞味期限' if item['expiry_type']=='best_before' else '消費期限',item['estimated_expiry'],item['remaining_dispatch_days'],item['remaining_arrival_days'],units(item['quantity_p'],products[item['product']])]
+             '賞味期限' if item['expiry_type']=='best_before' else '消費期限',item['estimated_expiry'],item['remaining_dispatch_days'],item['remaining_arrival_days'],line_units(item,products[item['product']])]
             for trip in report['trips'] if trip['warehouse']==warehouse for item in trip['items']]
 
 
@@ -30,7 +33,7 @@ def plan_grid(report, warehouse):
           [report['plan_id'],'計算実行日時',report['calculated_at'],'確認担当者',report.get('operator','未確認')],
           [f'仮製造日 {report["assumed_manufacture_date"]} / 最大16PL枠・1PL1商品。実期限ではありません。'],[],HEADERS]+grid_rows(report,warehouse)
     grid += [[],['日別予測（確定在庫ではありません）'],['商品','日付','需要予測P','確定入庫P','計画入庫P','計画後残高P','安全P']]
-    grid += [[r['product'],r['date'],r['forecast_p'],r['transit_p'],r['planned_inbound_p'],r['projected_after_plan_p'],r['safety_p']] for r in report['timeline'] if r['warehouse']==warehouse]
+    grid += [[r['product'],r['date'],r['forecast_p'],'対象外' if report.get('profile')==PROFILE else r['transit_p'],r['planned_inbound_p'],r['projected_after_plan_p'],r['safety_p']] for r in report['timeline'] if r['warehouse']==warehouse]
     grid += [[],['参考警告']]+[[w] for w in report['warnings'] if w.startswith(warehouse+' ')]
     grid += [['データ識別',report['digest']],['確定日時',report.get('confirmed_at','未確定')]]
     return grid
@@ -54,7 +57,7 @@ def plan_pdf(report, warehouse):
         t.setStyle(TableStyle([('GRID',(0,0),(-1,-1),.3,colors.grey),('BACKGROUND',(0,0),(-1,0),colors.HexColor('#e5eff5')),('VALIGN',(0,0),(-1,-1),'TOP'),('TOPPADDING',(0,0),(-1,-1),5),('BOTTOMPADDING',(0,0),(-1,-1),5)]))
         return t
     story += [table(HEADERS,grid_rows(report,warehouse),[44,73,73,45,76,55,34,48,73,35,35,80]),Spacer(1,10),para('日別予測（実在庫の期限切れ・廃棄数量は算出しません）')]
-    timeline=[[r['product'],r['date'],r['forecast_p'],r['transit_p'],r['planned_inbound_p'],r['projected_after_plan_p'],r['safety_p']] for r in report['timeline'] if r['warehouse']==warehouse]
+    timeline=[[r['product'],r['date'],r['forecast_p'],'対象外' if report.get('profile')==PROFILE else r['transit_p'],r['planned_inbound_p'],r['projected_after_plan_p'],r['safety_p']] for r in report['timeline'] if r['warehouse']==warehouse]
     story += [table(['商品','日付','需要予測P','確定入庫P','計画入庫P','計画後残高P','安全P'],timeline,[100,100,90,90,90,90,80]),Spacer(1,8)]
     story += [para(w) for w in report['warnings'] if w.startswith(warehouse+' ')]
     story += [para('データ識別 '+report['digest']),para('確定日時 '+report.get('confirmed_at','未確定'))]

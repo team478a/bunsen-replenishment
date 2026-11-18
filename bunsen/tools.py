@@ -19,6 +19,11 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description='ブンセン 復旧・試用診断ツール')
     parser.add_argument('--version', action='version', version=__version__)
     sub = parser.add_subparsers(dest='command', required=True)
+    jan_kit=sub.add_parser('jan-kit',help='JAN・物理PL方式の架空PDF在庫キット')
+    jan_kit.add_argument('--dispatch',type=date.fromisoformat,required=True)
+    jan_kit.add_argument('--output',type=Path,required=True)
+    jan_demo=sub.add_parser('jan-demo',help='JAN・物理PL固定日付デモ')
+    jan_demo.add_argument('--output',type=Path,required=True)
     sub.add_parser('backup', help='バックアップのcreate / inspect / restore')
     test = sub.add_parser('self-test', help='架空データ・一時DBによる起動診断')
     test.add_argument('--output', type=Path, required=True)
@@ -38,7 +43,13 @@ def main(argv=None):
     outlook.add_argument('--start', type=date.fromisoformat, required=True)
     outlook.add_argument('--output', type=Path, required=True)
     parsed = parser.parse_args(args)
-    if parsed.command == 'self-test':
+    if parsed.command == 'jan-kit':
+        from .jan_demo import create_kit
+        print(create_kit(parsed.output,parsed.dispatch))
+    elif parsed.command == 'jan-demo':
+        from .jan_demo import main as run_jan
+        run_jan(parsed.output)
+    elif parsed.command == 'self-test':
         from .smoke import run_smoke
         print(json.dumps(run_smoke(parsed.output), ensure_ascii=True))
     elif parsed.command == 'demo':

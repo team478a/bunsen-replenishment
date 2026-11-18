@@ -29,8 +29,13 @@ class Inspection:
     read_consistency: dict = field(default_factory=unchecked)
 
 
-def inspect_folder(folder, now, *, workflow=None, product_csv=None):
+def inspect_folder(folder, now, *, workflow=None, product_csv=None, master_csvs=None):
     folder = Path(folder)
+    if (folder/'requirements.csv').exists():
+        from .requirements_data import inspect
+        if product_csv is not None:raise ValueError('JAN方式に旧登録商品マスタは使用できません')
+        return inspect(folder,now,master_csvs)
+    if master_csvs is not None:raise ValueError('登録JANマスタはrequirements.csv方式のみです')
     issues, files, skipped, raw, locations = [], [], [], {}, {}
     tables = {name: [] for name in SCHEMA}
     records = {name: [] for name in SCHEMA}
