@@ -97,6 +97,7 @@ class ForecastCSVTests(unittest.TestCase):
         plan=self.service.calculate_delivery_plan(data,DAY);confirmed=self.service.confirm_delivery_plan(plan['plan_id'],'担当',True)
         self.assertTrue(confirmed['formal']);self.assertTrue(all(type(r['quantity_p']) is int for r in confirmed['shipments']))
         self.assertTrue(all(t['pallets']<=16 for t in confirmed['trips']))
+        self.assertNotRegex('\n'.join(confirmed['warnings']),r'-?\d+/\d+P')
         validate_database(self.service.db)
         archive=self.path/'backup.zip';manifest=create_backup(self.service.db,self.kit/'home',archive,self.service.clock)
         restore_backup(archive,self.path/'restored',manifest['archive_sha256'],self.service.clock)

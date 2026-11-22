@@ -68,7 +68,7 @@ def build_plan(data, start, calculated_at, *, allow_provisional=False):
             closing = number(day['projected_closing_p'])+cumulative
             timelines.append(dict(warehouse=key[0],product=key[1],**day,planned_inbound_p=incoming,projected_after_plan_p=closing))
             if closing < 0:
-                warnings.append(f'{key[0]} {key[1]} {day["date"]}: 入荷前を含む欠品リスク（予測） {closing}P')
+                warnings.append(f'{key[0]} {key[1]} {day["date"]}: 入荷前を含む欠品リスク（予測） {canonical(closing)}P')
             elif closing < number(day['safety_p']):
                 warnings.append(f'{key[0]} {key[1]} {day["date"]}: 安全在庫未達リスク（予測）')
             if (day['transit_p'] or incoming) and number(day['opening_p'])+cumulative-incoming-number(day['forecast_p']) < 0:
@@ -94,7 +94,7 @@ def build_plan(data, start, calculated_at, *, allow_provisional=False):
         if not complete:
             warnings.append(f'{key[0]} {key[1]}: 概算期限までの予測不足のため過大補充リスクは確認不能')
         elif excess:
-            warnings.append(f'{key[0]} {key[1]}: 追加補充が概算期限内の予測需要を{excess}P超過（参考比較、廃棄量ではない）')
+            warnings.append(f'{key[0]} {key[1]}: 追加補充が概算期限内の予測需要を{canonical(excess)}P超過（参考比較、廃棄量ではない）')
     report = dict(format='bunsen-delivery-plan',version=1,start=str(start),end=str(end),calculated_at=calculated_at.isoformat(),
                 assumed_manufacture_date=str(manufactured),notice=NOTICE,capacity_pl=16,single_product_per_pl=True,
                 method='日付順・倉庫別・商品コード順のルール計算（大域最適性は未保証）',
