@@ -15,11 +15,11 @@
 
 productは13桁JAN文字列。JANの重複は停止。同じJANの元マスタ行を足し合わせない。warehouseはKOBE/SUGITO。倉庫一覧で確認された対応と提供された出荷・予測CSVのコード対応が逆転しているため、外部コードの共通変換は行わない。PDFは帳票内の神戸支店/杉戸営業所で判定する。
 
-quantity_pは0以上の整数。p_per_plは物理パレット1枚のP数で正整数。倉庫別・JAN別に両倉庫の行を必須とする。甲・PL＋甲・混載・端数積付は対象外。P数は根拠・保存用で、指示数量は常に整数物理PLに一致させる。
+在庫・指示のquantity_pは0以上の整数。原本証跡付きの[予測CSV取込](forecast-csv-import.md)に限り、予測quantity_pは小数を保持する。p_per_plは物理パレット1枚のP数で正整数。倉庫別・JAN別に両倉庫の行を必須とする。甲・PL＋甲・混載・端数積付は対象外。P数は根拠・保存用で、指示数量は常に整数物理PLに一致させる。
 
 cycle_days/coverage_daysは正整数、lead_days/safety_daysは0以上の整数。日別安全在庫は翌日からsafety_days分の予測。到着からmax(cycle_days,coverage_days)日を対象とし、在庫基準以降の需要も反映。各日末の不足最大値を必要Pとし、倉庫別p_per_plで切上げる。到着前欠品は警告し増量だけで解消したと表示しない。
 
-as_ofはタイムゾーン付きの確認済み基準日時。basisはopening/closing。dateはYYYY-MM-DD。forecast.statusはconfirmed/provisional/imputed。order_basis=included（注文を予測に含む明示）が必要。元の小数予測は勝手に丸めず整数契約違反として停止する。正式発行に未確定予測は使用できない。
+as_ofはタイムゾーン付きの確認済み基準日時。basisはopening/closing。dateはYYYY-MM-DD。forecast.statusはconfirmed/provisional/imputed。原本証跡付き予測はorder_basis=not_added（大口・注文を別加算しない）を使用する。従来の証跡なし契約はorder_basis=included（注文を予測に含む明示）と整数予測を引き続き要求する。正式発行に未確定予測は使用できない。
 
 confirmedはyesのみ。欠損・未確認を0補完しない。商品期限はbest_before/use_byと正整数shelf_life_days。両方空欄なら期限未整備として補充計算のみ可能、14日計画を停止する。登録JANマスタ画面では全項目の明示確認を求める。
 
@@ -52,4 +52,4 @@ BunsenReplenishment.exe --data-dir C:\BunsenTrial\jan-new\home
 
 ## 運用前の不足
 
-在庫基準時刻・始業/終業・空欄ルール、データ別外部倉庫コード対応、めかぶの期限とPL積載数、予測の端数/注文包含/確認区分、正式補充設定。添付Excel・提供された予測CSVの専用変換は未実装。確認済み様式以外のPDFや画像OCRには対応せず、未確認値は推定登録しない。
+在庫基準時刻・始業/終業・空欄ルール、データ別外部倉庫コード対応、めかぶの期限とPL積載数、正式補充設定と予測区分の運用責任。予測CSVは基本P列のみ採用、大口除外、小数保持後の物理PL切上げを実装した。外部コードは確認待ちのため固定しない。添付Excelの専用変換は未実装。確認済み様式以外のPDFや画像OCRには対応せず、未確認値は推定登録しない。

@@ -3,6 +3,7 @@ from datetime import date, timedelta
 
 from .core import DataError, JST, ValidationIssue, calculate, case_p
 from .requirements_data import active, pallet_p, PROFILE, NOTICE as REQUIREMENTS_NOTICE
+from .exact_quantity import number, canonical, ceil_multiple
 
 NOTICE = '今日製造した場合の概算期限（計算実行日を固定）。実商品の期限適合性・供給可能性・実出荷を保証しません。実在庫の期限・廃棄数量は不明です。'
 
@@ -40,11 +41,11 @@ def build_plan(data, start, calculated_at, *, allow_provisional=False):
                 continue
             prior = receipts.setdefault(key, [])
             arrival = date.fromisoformat(row['arrival'])
-            deficit = max([0]+[d['safety_p']-d['projected_closing_p']-sum(q for a,q in prior if a <= date.fromisoformat(d['date']))
+            deficit = max([0]+[number(d['safety_p'])-number(d['projected_closing_p'])-sum(q for a,q in prior if a <= date.fromisoformat(d['date']))
                                  for d in row['timeline'] if d['date'] >= row['arrival']])
             p = products[key[1]]
             multiple=row['unit_p'] if active(data) else case_p(p)
-            qty = ((deficit+multiple-1)//multiple)*multiple
+            qty = ceil_multiple(deficit,multiple)
             if not qty:
                 continue
             prior.append((arrival,qty));last_dispatch[key] = dispatch
@@ -64,13 +65,13 @@ def build_plan(data, start, calculated_at, *, allow_provisional=False):
                 continue
             incoming = sum(q for a,q in receipts.get(key,[]) if str(a)==day['date'])
             cumulative = sum(q for a,q in receipts.get(key,[]) if str(a)<=day['date'])
-            closing = day['projected_closing_p']+cumulative
+            closing = number(day['projected_closing_p'])+cumulative
             timelines.append(dict(warehouse=key[0],product=key[1],**day,planned_inbound_p=incoming,projected_after_plan_p=closing))
             if closing < 0:
-                warnings.append(f'{key[0]} {key[1]} {day["date"]}: 入荷前を含む欠品リスク（予測） {closing}P')
-            elif closing < day['safety_p']:
+                warnings.append(f'{key[0]} {key[1]} {day["date"]}: 入荷前を含む欠品リスク（予測） {canonical(closing)}P')
+            elif closing < number(day['safety_p']):
                 warnings.append(f'{key[0]} {key[1]} {day["date"]}: 安全在庫未達リスク（予測）')
-            if (day['transit_p'] or incoming) and day['opening_p']+cumulative-incoming-day['forecast_p'] < 0:
+            if (day['transit_p'] or incoming) and number(day['opening_p'])+cumulative-incoming-number(day['forecast_p']) < 0:
                 warnings.append(f'{key[0]} {key[1]} {day["date"]}: 同日入庫と需要の時刻順は未確認')
     for row in shipments:
         if row['remaining_arrival_days'] < 0:
@@ -85,7 +86,7 @@ def build_plan(data, start, calculated_at, *, allow_provisional=False):
         forecasts = {date.fromisoformat(r['date']):r['quantity_p'] for r in data.tables['forecast'] if (r['warehouse'],r['product'])==key and r['status']=='confirmed'}
         available = sorted(d for d in forecasts if first <= d <= until)
         complete = until < first or (len(available)==(until-first).days+1)
-        demand = sum(forecasts[d] for d in available) if complete else None
+        demand = sum(number(forecasts[d]) for d in available) if complete else None
         total = sum(r['quantity_p'] for r in selected)
         excess = max(0,total-demand) if complete else None
         risks.append(dict(warehouse=key[0],product=key[1],estimated_expiry=str(until),planned_p=total,forecast_until_expiry_p=demand,
@@ -93,7 +94,7 @@ def build_plan(data, start, calculated_at, *, allow_provisional=False):
         if not complete:
             warnings.append(f'{key[0]} {key[1]}: 概算期限までの予測不足のため過大補充リスクは確認不能')
         elif excess:
-            warnings.append(f'{key[0]} {key[1]}: 追加補充が概算期限内の予測需要を{excess}P超過（参考比較、廃棄量ではない）')
+            warnings.append(f'{key[0]} {key[1]}: 追加補充が概算期限内の予測需要を{canonical(excess)}P超過（参考比較、廃棄量ではない）')
     report = dict(format='bunsen-delivery-plan',version=1,start=str(start),end=str(end),calculated_at=calculated_at.isoformat(),
                 assumed_manufacture_date=str(manufactured),notice=NOTICE,capacity_pl=16,single_product_per_pl=True,
                 method='日付順・倉庫別・商品コード順のルール計算（大域最適性は未保証）',
@@ -104,7 +105,9 @@ def build_plan(data, start, calculated_at, *, allow_provisional=False):
     if active(data):
         report.update(profile=PROFILE,inbound_scope='excluded',pallet_masters=data.tables['pallets'],method='日付順・倉庫別・JAN順の物理PLルール計算（大域最適性は未保証）')
         report['warnings'].insert(0,REQUIREMENTS_NOTICE)
-    return report
+    from .forecast_csv import metadata
+    if metadata(data.raw) is not None:report['forecast_source']=metadata(data.raw)
+    return canonical(report)
 
 
 def pack_trips(shipments):

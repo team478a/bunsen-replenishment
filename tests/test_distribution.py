@@ -38,6 +38,7 @@ class DistributionTests(unittest.TestCase):
             self.assertTrue(payload['success'])
             self.assertFalse(payload['frozen'])
             self.assertIn('backup_restore_read_only', payload['checks'])
+            self.assertIn('base_forecast_decimal_import', payload['checks'])
             self.assertFalse((root / 'normal').exists())
 
     def test_build_resources_copy_only_allowlisted_tracked_files(self):
