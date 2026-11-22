@@ -16,13 +16,14 @@ from .planning import compare, comparison_text, overlay
 from .catalog import CatalogService, catalog_csv
 from .jan_catalog import JanCatalog, master_csvs
 from .requirements_data import active, PROFILE, NOTICE
+from .forecast_service import ForecastService
 
 
 def encode(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
-class Service(JanCatalog, CatalogService):
+class Service(ForecastService, JanCatalog, CatalogService):
     def __init__(self, db_path, clock=now_jst):
         self.clock = clock
         self.db_path = Path(db_path).resolve()
@@ -317,6 +318,8 @@ class Service(JanCatalog, CatalogService):
         if fresh.workflow == 2:
             payload.update(workflow=2,meaning='replenishment_instruction_not_shipment_actual',settings=fresh.tables['replenishment'])
             if active(fresh):payload.update(profile=PROFILE,inbound_scope='excluded',notice=NOTICE)
+            from .forecast_csv import metadata
+            if metadata(fresh.raw) is not None:payload['forecast_source']=metadata(fresh.raw)
             if data.jan_master_revision is not None:payload['jan_master_revision']=data.jan_master_revision
             if data.product_master_revision is not None:payload['product_master_revision']=data.product_master_revision
         if reference:

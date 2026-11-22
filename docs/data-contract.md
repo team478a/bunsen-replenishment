@@ -1,3 +1,5 @@
+0.7.0のJAN方式には[予測結果CSV取込](forecast-csv-import.md)を追加。原本証跡付きの変換に限り小数Pとorder_basis=not_addedを使用します。以下の旧契約の整数・includedの意味は変更しません。
+
 最新のJAN・物理PL・入庫対象外方式は [jan-pl-contract.md](jan-pl-contract.md) を参照。以下は旧v2の原本互換契約です。
 
 # 新方式CSV仮契約 v2

@@ -15,6 +15,7 @@ class SimpleUI:
         ttk.Label(bar,text='出荷日').pack(side='left')
         ttk.Entry(bar,textvariable=self.day,width=13).pack(side='left',padx=6)
         self.write_button(bar,text='在庫PDFを読み取る',command=self.pdf_inventory_dialog).pack(side='left',padx=4)
+        self.write_button(bar,text='予測CSVを取込',command=self.forecast_dialog).pack(side='left',padx=4)
         self.write_button(bar,text='データを開いて計算',style='Primary.TButton',command=lambda:self.run(self.open_and_compute)).pack(side='left',padx=5)
         self.write_button(bar,text='再計算',command=lambda:self.run(self.compute)).pack(side='left')
         self.result_status=tk.StringVar(value='データのフォルダーを選んでください')
@@ -50,6 +51,10 @@ class SimpleUI:
 
     def open_and_compute(self):
         if self.import_data(automatic_sources=True):self.compute()
+
+    def forecast_dialog(self):
+        from .forecast_ui import ForecastDialog
+        return ForecastDialog(self)
 
     def edit_display_quantity(self):
         if not self.tree.selection():raise DataError(['修正する商品を選択してください'])

@@ -14,6 +14,8 @@ HEADERS = ['便','出荷日','入荷日','商品','品名','数量P','PL枠','�
 def plan_notice(report):
     parts = [report['notice'], '正式配送予定' if report['formal'] else '参考・未確定配送計画（正式使用不可）']
     if report.get('profile')==PROFILE:parts.append(NOTICE)
+    if report.get('forecast_source'):
+        source=report['forecast_source'];parts.append('需要予測列: '+source['quantity_column']+' / 大口・注文・製造・入庫の別加算なし / 倉庫対応 '+', '.join(code+'→'+LABELS[w] for code,w in source['mapping'].items()))
     if report.get('jan_master_revision') is not None:parts.append(f'JAN・PLマスタ版 {report["jan_master_revision"]}')
     if report.get('product_master_revision') is not None:parts.append(f'登録商品マスタ版 {report["product_master_revision"]}（計算時の保存原本）')
     if report.get('trial_only'):parts.append('架空試用・実出荷不可')

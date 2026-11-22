@@ -26,6 +26,8 @@ def main(argv=None):
     jan_demo.add_argument('--output',type=Path,required=True)
     pdf_demo=sub.add_parser('pdf-demo',help='PDF自動読取・確認・正式出力の架空固定日付デモ')
     pdf_demo.add_argument('--output',type=Path,required=True)
+    forecast_demo=sub.add_parser('forecast-demo',help='大口除外・小数予測・物理PLの架空固定日付デモ')
+    forecast_demo.add_argument('--output',type=Path,required=True)
     sub.add_parser('backup', help='バックアップのcreate / inspect / restore')
     test = sub.add_parser('self-test', help='架空データ・一時DBによる起動診断')
     test.add_argument('--output', type=Path, required=True)
@@ -54,6 +56,9 @@ def main(argv=None):
     elif parsed.command == 'pdf-demo':
         from .pdf_demo import main as run_pdf
         run_pdf(parsed.output)
+    elif parsed.command == 'forecast-demo':
+        from .forecast_demo import main as run_forecast
+        run_forecast(parsed.output)
     elif parsed.command == 'self-test':
         from .smoke import run_smoke
         print(json.dumps(run_smoke(parsed.output), ensure_ascii=True))

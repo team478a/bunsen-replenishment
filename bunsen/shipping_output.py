@@ -16,6 +16,9 @@ HEADERS = ['商品','品名','現在庫P','対象予測P','安全P(最大)','必
 def notice(payload):
     parts = ['必要補充数量の指示です。実出荷実績・ブンセンの供給可能在庫を示しません。']
     if payload.get('profile')==PROFILE:parts.append(NOTICE)
+    if payload.get('forecast_source'):
+        source=payload['forecast_source']
+        parts.append('需要予測列: '+source['quantity_column']+' / 大口・注文・製造・入庫の別加算なし / 倉庫対応 '+', '.join(code+'→'+LABELS[w] for code,w in source['mapping'].items()))
     if payload.get('jan_master_revision') is not None:parts.append(f'JAN・PLマスタ版 {payload["jan_master_revision"]}')
     if payload.get('product_master_revision') is not None:
         parts.append(f'登録商品マスタ版 {payload["product_master_revision"]}（発行時の保存原本）。')

@@ -152,6 +152,7 @@ class PDFInventoryDialog(tk.Toplevel):
         folder=filedialog.askdirectory(parent=self,title='確認済み在庫CSVの新規保存先')
         if not folder:return
         self.service.save_pdf_inventory(reports,decisions,self.app.operator.get(),True,self.revision,folder)
+        self.app.invalidate();self.app.data=None
         self.app.info.set('確認済み在庫CSV・商品PLマスタ・PDF原本証跡・修正履歴を保存しました。需要予測と補充条件CSVを配置して「データを開いて計算」へ進んでください。')
         self.app.result_status.set('在庫PDFの確認・保存が完了しました。需要予測・補充条件と合わせてデータを開いてください。')
         self.destroy()

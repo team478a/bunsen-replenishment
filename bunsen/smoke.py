@@ -135,6 +135,9 @@ def run_smoke(output):
         from .pdf_demo import main as run_pdf
         run_pdf(home/'pdf-reader-kit')
         checks.append('pdf_read_preview_review_formal')
+        from .forecast_demo import main as run_forecast
+        run_forecast(home/'forecast-kit')
+        checks.append('base_forecast_decimal_import')
     result = dict(version=__version__, frozen=bool(getattr(sys, 'frozen', False)),
                   executable=Path(sys.executable).name, checks=checks, success=True)
     output.parent.mkdir(parents=True, exist_ok=True)

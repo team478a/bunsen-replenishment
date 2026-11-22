@@ -9,6 +9,10 @@ from pathlib import Path
 
 from .core import DataError, Dataset, ValidationIssue, WAREHOUSES, stamp
 from .input_guard import InputGuard
+from .exact_quantity import decimal_quantity
+
+# A 20MB PDF evidence field can exceed the csv module's 128KB default.
+csv.field_size_limit(32*1024*1024)
 
 PROFILE = 'jan_physical_pl_no_inbound'
 NOTICE = 'ムロオ必要量・物理PL単位。確定入庫・輸送中数量は計算対象外（確認済み0件ではありません）。供給可能量・実出荷実績ではありません。'
@@ -71,7 +75,14 @@ def inspect(folder, now, master_csvs=None):
         raise DataError(['登録JANマスタの置換対象が不正です'])
     try:
         guard = SourceGuard(folder, ignored)
-        allowed = {k+'.csv' for k in SCHEMA} | {'source_evidence.csv'}
+        from .forecast_csv import REVIEW_FILE, verify_review
+        expected_forecast=None
+        if (folder/REVIEW_FILE).exists():
+            proof=(folder/REVIEW_FILE).read_bytes();guard.remember(folder/REVIEW_FILE,proof)
+            raw[REVIEW_FILE]=proof.decode('utf-8-sig').replace('\r\n','\n').replace('\r','\n')
+            try:expected_forecast,_=verify_review(raw[REVIEW_FILE])
+            except (ValueError,TypeError,KeyError,csv.Error) as exc:error('forecast-review','proof',str(exc))
+        allowed = {k+'.csv' for k in SCHEMA} | {'source_evidence.csv',REVIEW_FILE}
         for filename in guard.initial:
             if filename.endswith('.csv') and filename not in allowed:
                 guard.remember(folder/filename,(folder/filename).read_bytes())
@@ -104,13 +115,15 @@ def inspect(folder, now, master_csvs=None):
                             if any(ord(c)<32 for c in value):raise ValueError('制御文字は使用できません')
                             if field=='product' and (not value.isascii() or not value.isdecimal() or len(value)!=13):raise ValueError('13桁のJAN文字列が必要です')
                             if field in ('quantity_p','p_per_pl','cycle_days','lead_days','safety_days','coverage_days','shelf_life_days'):
+                                if table=='forecast' and field=='quantity_p' and expected_forecast is not None:
+                                    converted[field]=decimal_quantity(value);continue
                                 if not value.isascii() or not value.isdecimal():raise ValueError('0以上の整数が必要です。丸め方は自動決定しません')
                                 converted[field]=int(value)
                                 if field not in ('quantity_p','lead_days','safety_days') and int(value)==0:raise ValueError('正整数が必要です')
                             if field=='as_of' and stamp(value)>now:raise ValueError('未来の基準日時です')
                             if field=='date' and date.fromisoformat(value).isoformat()!=value:raise ValueError('YYYY-MM-DDが必要です')
                             choices={'warehouse':WAREHOUSES,'confirmed':('yes',),'basis':('opening','closing'),
-                                     'expiry_type':('best_before','use_by'),'order_basis':('included',),
+                                     'expiry_type':('best_before','use_by'),'order_basis':('not_added',) if expected_forecast is not None else ('included',),
                                      'status':('confirmed','provisional','imputed')}
                             if field in choices and value not in choices[field]:raise ValueError('未対応・未確認の区分です')
                             if field=='source_sha256' and (len(value)!=64 or any(c not in '0123456789abcdef' for c in value)):raise ValueError('SHA-256が不正です')
@@ -122,6 +135,8 @@ def inspect(folder, now, master_csvs=None):
                     if before==len(errors):tables[table].append(converted);locations[table][key]=line
             except (OSError,UnicodeError,csv.Error) as exc:
                 info['status']='read_error';error(table,'file',f'読取不能: {exc}')
+        if expected_forecast is not None and raw.get('forecast.csv')!=expected_forecast:
+            error('forecast','quantity_p','予測CSVと確認済み原本・採用列・倉庫対応が不一致です。再変換してください')
         products={r['product'] for r in tables['products']}
         if not products:error('products','product','商品がありません')
         for table,rows in tables.items():

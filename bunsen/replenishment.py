@@ -4,6 +4,7 @@ from datetime import date, timedelta
 
 from .core import DataError, ValidationIssue, case_p, now_jst, stamp, JST
 from .requirements_data import active, pallet_p, NOTICE
+from .exact_quantity import number, canonical, ceil_multiple
 
 
 def calculate(data, dispatch, *, allow_provisional=False):
@@ -66,14 +67,14 @@ def calculate(data, dispatch, *, allow_provisional=False):
         # Every required date is present before generating a timeline or numeric result.
         prefix = [0]
         for d in days:
-            prefix.append(prefix[-1] + forecast[d]['quantity_p'])
+            prefix.append(prefix[-1] + number(forecast[d]['quantity_p']))
         balance, needed, timeline = inv['quantity_p'], 0, []
         for index, day in enumerate(days):
             if day > end:
                 break
             opening = balance
             incoming = receipts.get(day,0)
-            demand = forecast[day]['quantity_p']
+            demand = number(forecast[day]['quantity_p'])
             balance += incoming - demand
             safety = prefix[index+1+setting['safety_days']] - prefix[index+1]
             if day >= arrival:
@@ -83,7 +84,7 @@ def calculate(data, dispatch, *, allow_provisional=False):
                                  timing_unconfirmed=bool(incoming and opening-demand < 0)))
         needed = max(0,needed)
         multiple = pallet_p(data,w,p) if pl_only else case_p(products[p])
-        adjusted = ((needed+multiple-1)//multiple)*multiple
+        adjusted = ceil_multiple(needed,multiple)
         risk = [r['date'] for r in timeline if r['date'] < str(arrival) and r['projected_closing_p'] < 0]
         uncertain = [str(d) for d in days if forecast[d]['status'] != 'confirmed']
         warnings = []
@@ -108,7 +109,7 @@ def calculate(data, dispatch, *, allow_provisional=False):
                            timeline=timeline,warning=' / '.join(warnings),rounding='ceil_physical_pl' if pl_only else 'ceil_case',unit_p=multiple))
     if errors:
         raise DataError(errors)
-    return result
+    return canonical(result)
 
 
 def overlay(calculated, requested):
@@ -130,7 +131,7 @@ def overlay(calculated, requested):
         if qty != row['suggested_p'] and not reason.strip():
             raise DataError(['自動計算値と異なる数量には修正理由が必要です'])
         row.update(quantity_p=qty,edit_reason=reason)
-        if qty < row['required_p']:
+        if qty < number(row['required_p']):
             row['warning'] += ' / 担当者修正後も安全在庫未達のリスクがあります。'
     return result
 

@@ -2,6 +2,7 @@
 from datetime import date
 from pathlib import Path
 from .simple_ui import SimpleUI
+from .exact_quantity import number
 import json
 import tkinter as tk
 from tkinter import ttk, filedialog
@@ -165,17 +166,20 @@ class App(SimpleUI, JanCatalogUI, CatalogUI, DeliveryUI, LegacyApp):
         self.tree.delete(*self.tree.get_children())
         products={r['product']:r for r in self.data.tables['products']}
         for i,r in enumerate(self.lines):
-            self.tree.insert('','end',iid=str(i),tags=('attention' if r['warning'] or r['quantity_p']<r['required_p'] else ('alternate' if i%2 else ''),),values=(LABELS[r['warehouse']],r['product']+' '+products[r['product']]['name'],r['inventory_p'],r['demand_p'],r['safety_p'],r['required_p'],r['suggested_p'],r['quantity_p'],r['quantity_p'] if self.finalized else '未確定',line_units(r,products[r['product']]),r['arrival']))
+            self.tree.insert('','end',iid=str(i),tags=('attention' if r['warning'] or r['quantity_p']<number(r['required_p']) else ('alternate' if i%2 else ''),),values=(LABELS[r['warehouse']],r['product']+' '+products[r['product']]['name'],r['inventory_p'],r['demand_p'],r['safety_p'],r['required_p'],r['suggested_p'],r['quantity_p'],r['quantity_p'] if self.finalized else '未確定',line_units(r,products[r['product']]),r['arrival']))
         errors=validate(self.data,self.lines,self.dispatch,self.service.clock())
         state='正式確定済み' if self.finalized else '未確定'
-        warnings=sum(bool(r['warning']) or r['quantity_p']<r['required_p'] for r in self.lines)
+        warnings=sum(bool(r['warning']) or r['quantity_p']<number(r['required_p']) for r in self.lines)
         self.result_status.set(f'{state}  /  {len(self.lines)}明細  /  検証不備 {len(errors)}件  /  注意明細 {warnings}件')
         evidence=[]
+        from .forecast_csv import metadata
+        forecast_source=metadata(self.data.raw)
+        if forecast_source:evidence.append('予測採用列: '+forecast_source['quantity_column']+' / 大口・特売・製造・入庫の別加算なし / 確認者 '+forecast_source['operator']+' / 倉庫対応 '+str(forecast_source['mapping']))
         for row in self.lines:
             if row.get('source_pdf'):evidence.append(f'在庫PDF {row["source_pdf"]} / SHA-256 {row["source_sha256"]} / 転記確認者 {row["inventory_checker"]}')
             evidence.append(f'{LABELS[row["warehouse"]]} {row["product"]}: 在庫基準 {row["inventory_as_of"]} ({row["inventory_basis"]}) / 入庫網羅 {row['transit_checked_at'] if row['transit_checked_at'] is not None else '対象外'} / 予測基準 {row["forecast_as_of"]}\n{row["warning"]}')
             evidence.extend(f'{r["date"]}: 始業予測 {r["opening_p"]}P + 確定入庫 {str(r['transit_p'])+'P' if r['transit_p'] is not None else '対象外'} - 需要予測 {r["forecast_p"]}P = 補充前予測 {r["projected_closing_p"]}P / 安全在庫 {r["safety_p"]}P' for r in row['timeline'])
-            if row['quantity_p'] < row['required_p']:evidence.append('修正後も安全在庫未達のリスクがあります。理由と数量を確認してください。')
+            if row['quantity_p'] < number(row['required_p']):evidence.append('修正後も安全在庫未達のリスクがあります。理由と数量を確認してください。')
         if errors and not self.details_frame.winfo_manager():self.toggle_details()
         self.show('\n'.join([NOTICE if active(self.data) else '必要補充の指示であり実出荷実績ではありません。']+evidence+['確定前検証']+(errors or ['入力検証に不備なし。担当者の確認操作が必要です。'])))
 
