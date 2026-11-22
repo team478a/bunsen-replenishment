@@ -4,6 +4,7 @@ import hashlib
 from pathlib import Path
 from .core import DataError, WAREHOUSES, stamp
 from .requirements_data import SCHEMA, EVIDENCE, csv_text
+from .input_guard import _signature
 
 
 def prepare_inventory(products, pdfs, as_of, basis, checker, folder):
@@ -12,7 +13,7 @@ def prepare_inventory(products, pdfs, as_of, basis, checker, folder):
     stamp(as_of)
     sources=[];inventory=[]
     for warehouse in WAREHOUSES:
-        path=Path(pdfs[warehouse]);before=path.stat();content=path.read_bytes();after=path.stat()
+        path=Path(pdfs[warehouse]);before=_signature(path);content=path.read_bytes();after=_signature(path)
         if before!=after or path.read_bytes()!=content:raise DataError(['読取中にPDFが変わりました'])
         if len(content)>20*1024*1024 or not content.startswith(b'%PDF-'):raise DataError(['20MB以下のPDFを選択してください'])
         # Canonical names avoid accidentally merging two equally named warehouse reports.

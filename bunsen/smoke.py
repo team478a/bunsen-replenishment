@@ -132,6 +132,9 @@ def run_smoke(output):
         checks.append('product_master_registration')
         run_jan_smoke(home)
         checks.append('jan_physical_pl_pdf_inventory')
+        from .pdf_demo import main as run_pdf
+        run_pdf(home/'pdf-reader-kit')
+        checks.append('pdf_read_preview_review_formal')
     result = dict(version=__version__, frozen=bool(getattr(sys, 'frozen', False)),
                   executable=Path(sys.executable).name, checks=checks, success=True)
     output.parent.mkdir(parents=True, exist_ok=True)
