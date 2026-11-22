@@ -50,7 +50,7 @@ def copy_licenses(target, packages):
         copied = 0
         for file in dist.files or []:
             relative = str(file).replace('\\', '/')
-            if '.dist-info/' in relative and Path(relative).name.lower().startswith(('license', 'copying', 'notice')):
+            if '.dist-info/' in relative and ('/licenses/' in relative.lower() or Path(relative).name.lower().startswith(('license', 'copying', 'notice'))):
                 destination = licenses / 'build-tools' / package / relative
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(dist.locate_file(file), destination)
