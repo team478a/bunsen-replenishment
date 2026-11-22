@@ -30,6 +30,28 @@ def master_csvs(products):
 
 
 class JanCatalog:
+    def save_pdf_inventory(self,reports,decisions,operator,acknowledged,expected_revision,folder):
+        from .pdf_reader import write_reviewed
+        from .service import encode
+        from .core import stamp
+        self.ensure_writable()
+        if acknowledged is not True:raise DataError(['PDF読取結果の担当者確認が必要です'])
+        created=[]
+        try:
+            with self.db:
+                self.db.execute('BEGIN IMMEDIATE');state=self.jan_master()
+                if state['revision']!=expected_revision:raise DataError(['JANマスタが変更されています。PDF確認画面を開き直してください'])
+                for entry in reports.values():
+                    if stamp(entry['as_of'])>self.clock():raise DataError(['未来の在庫基準日時は使用できません'])
+                created,review=write_reviewed(reports,decisions,state['products'],operator,folder)
+                review.update(jan_master_revision=state['revision'],acknowledged=True)
+                self.db.execute('INSERT INTO events(at,kind,payload) VALUES(?,?,?)',
+                                (self.clock().isoformat(),'pdf_inventory_review',encode(review)))
+        except Exception:
+            for path in created:path.unlink(missing_ok=True)
+            raise
+        return created
+
     def jan_master(self):
         row=self.db.execute("SELECT id,payload FROM events WHERE kind='jan_master_change' ORDER BY id DESC LIMIT 1").fetchone()
         return dict(revision=row[0],products=json.loads(row[1])['products']) if row else dict(revision=0,products=[])

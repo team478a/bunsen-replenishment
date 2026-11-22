@@ -107,28 +107,6 @@ class JanCatalogUI:
         self.jan_status.set('products.csv / pallets.csv を新規保存しました。元の業務Excelは変更していません。')
 
     def pdf_inventory_dialog(self):
-        from .pdf_inventory import prepare_inventory
-        dialog=tk.Toplevel(self.root);dialog.title('PDF在庫の確認転記準備（自動読取ではありません）')
-        dialog.transient(self.root)
-        frame=ttk.Frame(dialog,padding=16);frame.pack(fill='both',expand=True)
-        responsive_label(frame,text='PDFは原本証跡として保存します。数量の自動抽出はしません。作成CSVのquantity_pとconfirmedを担当者が確認整備してから取り込みます。').grid(row=0,column=0,columnspan=3,sticky='ew',pady=5)
-        variables={key:tk.StringVar() for key in ('KOBE','SUGITO','as_of','basis','checker')}
-        for index,(key,label) in enumerate((('KOBE','神戸の報告PDF'),('SUGITO','杉戸の報告PDF'),('as_of','在庫基準日時（時差付き）'),('basis','始業/終業'),('checker','転記確認者')),1):
-            ttk.Label(frame,text=label).grid(row=index,column=0,sticky='w',pady=6)
-            widget=(ttk.Combobox(frame,textvariable=variables[key],values=('始業','終業'),state='readonly') if key=='basis' else ttk.Entry(frame,textvariable=variables[key],width=50))
-            widget.grid(row=index,column=1,sticky='ew',pady=6,padx=5)
-            if key in ('KOBE','SUGITO'):
-                def choose(k=key):
-                    path=filedialog.askopenfilename(parent=dialog,title=k+'の在庫報告PDF',filetypes=[('PDF','*.pdf')])
-                    if path:variables[k].set(path)
-                ttk.Button(frame,text='PDFを選択',command=choose).grid(row=index,column=2,padx=5)
-        def save():
-            self.service.ensure_writable()
-            products=self.service.jan_master()['products']
-            if not products:raise DataError(['先に確認済みJAN・PLマスタを登録してください'])
-            folder=filedialog.askdirectory(parent=dialog,title='在庫CSVひな形の新規保存先')
-            if not folder:return
-            prepare_inventory(products,{w:variables[w].get() for w in ('KOBE','SUGITO')},variables['as_of'].get(),{'始業':'opening','終業':'closing'}.get(variables['basis'].get()),variables['checker'].get(),folder)
-            self.info.set('PDF証跡と在庫CSVひな形を保存しました。数量とconfirmedは空欄です。確認転記してから取り込んでください。')
-            dialog.destroy()
-        ttk.Button(frame,text='PDF証跡・未確認在庫CSVを新規保存',state='disabled' if self.service.read_only else 'normal',command=lambda:self.run(save)).grid(row=6,column=0,columnspan=3,pady=10)
+        from .pdf_reader_ui import PDFInventoryDialog
+        if not self.service.jan_master()['products']:raise DataError(['先に確認済みJAN・PLマスタを登録してください'])
+        return PDFInventoryDialog(self)

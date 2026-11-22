@@ -35,7 +35,7 @@ def create_kit(folder, day):
             tables['forecast'].append(dict(warehouse=warehouse,product=jan,date=str(day+timedelta(days=i)),quantity_p=60 if warehouse=='KOBE' else 30,as_of=at,order_basis='included',status='confirmed'))
     for name,fields in SCHEMA.items():(source/(name+'.csv')).write_text(csv_text(fields,tables[name]),encoding='utf-8-sig')
     (source/'source_evidence.csv').write_text(csv_text(EVIDENCE,evidence),encoding='utf-8-sig')
-    (folder/'GUIDE.md').write_text('架空JAN・PL方式。業務条件ではありません。\nBunsenReplenishment.exe --data-dir "'+str(home.resolve())+'"\n出荷予定日を'+str(day)+'にしてcsvフォルダーを取り込みます。神戸120P→240P（1物理PL）、杉戸72P→480P（1物理PL）。\n入庫・輸送中は対象外。PDFは保存証跡内に保持。実PDFの自動抽出はありません。',encoding='utf-8')
+    (folder/'GUIDE.md').write_text('架空JAN・PL方式。業務条件ではありません。\nBunsenReplenishment.exe --data-dir "'+str(home.resolve())+'"\n出荷予定日を'+str(day)+'にしてcsvフォルダーを取り込みます。神戸120P→240P（1物理PL）、杉戸72P→480P（1物理PL）。\n入庫・輸送中は対象外。PDFは保存証跡内に保持。この架空PDFは証跡確認用です。確認済み様式の自動読取デモはpdf-demoを使用します。',encoding='utf-8')
     return folder
 
 

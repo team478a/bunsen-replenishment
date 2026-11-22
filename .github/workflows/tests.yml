@@ -14,6 +14,7 @@ jobs:
       - run: python -m unittest discover -s tests -v
       - run: python -m bunsen.demo
       - run: python -m bunsen.tools jan-demo --output dist/jan-fixed-date-demo
+      - run: python -m bunsen.tools pdf-demo --output dist/pdf-fixed-date-demo
   package:
     name: Windows package
     needs: test

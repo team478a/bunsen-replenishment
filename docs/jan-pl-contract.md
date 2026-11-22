@@ -13,7 +13,7 @@
 |requirements.csv|warehouse,product,cycle_days,lead_days,safety_days,coverage_days,confirmed|
 |source_evidence.csv（保存証跡）|source_pdf,sha256,content_base64|
 
-productは13桁JAN文字列。JANの重複は停止。同じJANの元マスタ行を足し合わせない。warehouseはKOBE/SUGITO。外部70301/70302の対応は未確定のため自動変換しない。
+productは13桁JAN文字列。JANの重複は停止。同じJANの元マスタ行を足し合わせない。warehouseはKOBE/SUGITO。倉庫一覧で確認された対応と提供された出荷・予測CSVのコード対応が逆転しているため、外部コードの共通変換は行わない。PDFは帳票内の神戸支店/杉戸営業所で判定する。
 
 quantity_pは0以上の整数。p_per_plは物理パレット1枚のP数で正整数。倉庫別・JAN別に両倉庫の行を必須とする。甲・PL＋甲・混載・端数積付は対象外。P数は根拠・保存用で、指示数量は常に整数物理PLに一致させる。
 
@@ -23,18 +23,13 @@ as_ofはタイムゾーン付きの確認済み基準日時。basisはopening/cl
 
 confirmedはyesのみ。欠損・未確認を0補完しない。商品期限はbest_before/use_byと正整数shelf_life_days。両方空欄なら期限未整備として補充計算のみ可能、14日計画を停止する。登録JANマスタ画面では全項目の明示確認を求める。
 
-## PDF在庫の準備
+## PDF在庫の自動読取と確認
 
-1. JAN・倉庫別PLマスタを確認登録する（CSVからのマスタ取込でも計算可能）。
-2. 補充出荷の「報告PDFから在庫CSVひな形を作成」を開く。
-3. 神戸/杉戸それぞれの報告PDF、在庫基準日時、始業/終業、転記確認者を指定し新規保存先を選ぶ。
-4. inventory.csvとsource_evidence.csvを生成。数量とconfirmedは空欄のため、そのままでは取り込めない。
-5. 原本PDFと照合しJANごとのquantity_pを転記。実際に0の場合も0を明記し、確認できた行のみconfirmed=yesとする。商品が載っていないだけで0にしない。
-6. products/pallets/forecast/requirementsと同じフォルダーに配置し取込。products/palletsが両方ない場合だけ登録JANマスタを自動使用する。片方だけの欠損は停止する。旧v2登録マスタは併用しない。日常操作は[簡素化後の操作仕様](simple-ui.md)を参照。
+[PDF読取の操作・検証仕様](pdf-inventory-reader.md)。確認済みの「在庫一覧受払」様式を読み、商品合計だけを採用する。担当者による数量確認・必要な修正と理由の記録後にinventory.csv、source_evidence.csv、products.csv、pallets.csv、pdf-review.jsonを新規保存する。予測・補充条件CSVは別途配置する。
 
-PDFは自動抽出しない。20MB以下のPDF原本のバイト列をSHA-256とbase64で証跡CSVへ格納し、DB保存原本に保持する。既存の証跡CSVがなくても、inventoryのsource_pdfに指定された同フォルダーのPDF原本を読み保存できる。両方ある場合は一致を確認。source_sha256・checker・基準日時・数量・確認区分は必須。証跡はファイル同一性を確認するものであり、転記値と原本内容の業務上の一致は担当者が確認する。
+PDF原本のSHA-256、13桁JAN、現在庫ケース・バラ、C入、集計日、作成日時、ページ、空欄の解釈、確認者、変更前後の数量と理由を保存。空欄は未確認のまま保持し、確認済みの帳票ルールを指定した場合だけ0へ換算する。原本表示で左側が切れているJANも内部文字が13桁ある場合はそのまま読み、6桁しかない場合に補完しない。画像PDF・別様式・ページ欠落・商品合計の欠落や重複は停止する。
 
-読取前後にCSV/PDFの一覧・属性・内容を照合し、変更や照合不能時は停止する。同一バッチ・原子的取得は保証しない。PDFのファイル名だけで倉庫を判断せず、明示的に選択する。原本や既存CSVは上書きしない。
+従来の未確認ひな形生成関数は互換用として維持する。PDF原本証跡・確認済みCSVの取込時照合も維持する。読取だけでconfirmed=yesにはせず、担当者の明示保存操作を必須とする。
 
 ## 対象外の明示
 
@@ -57,4 +52,4 @@ BunsenReplenishment.exe --data-dir C:\BunsenTrial\jan-new\home
 
 ## 運用前の不足
 
-実際のムロオPDF様式/基準時刻、外部倉庫コード、めかぶの期限とPL積載数、予測の端数/注文包含/確認区分、正式補充設定。添付Excel・予測CSVの自動変換や実PDFの自動抽出は未実装。実資料の未確認値をアプリへ自動登録していない。
+在庫基準時刻・始業/終業・空欄ルール、データ別外部倉庫コード対応、めかぶの期限とPL積載数、予測の端数/注文包含/確認区分、正式補充設定。添付Excel・提供された予測CSVの専用変換は未実装。確認済み様式以外のPDFや画像OCRには対応せず、未確認値は推定登録しない。

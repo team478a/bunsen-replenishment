@@ -67,3 +67,19 @@ class DistributionTests(unittest.TestCase):
                 App.open_report(ROOT / 'report.html')
         self.assertEqual(kernel.SetDllDirectoryW.call_args_list[0].args, (None,))
         self.assertEqual(kernel.SetDllDirectoryW.call_args_list[1].args, (r'C:\bundle\_internal',))
+
+    def test_distribution_keeps_named_files_under_modern_license_directories(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);target=root/'bundle';target.mkdir()
+            for name in ['LICENSE.txt','tcl/tk8.6/license.terms','distribution/licenses/Tcl.txt',
+                         'fixture.dist-info/licenses/BUILD_LICENSES/pdfium.txt',
+                         'fixture.dist-info/licenses/LICENSES/BSD-3-Clause.txt','fixture/module.py']:
+                path=root/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text('fixture')
+            dist=Mock();dist.files=['fixture.dist-info/licenses/BUILD_LICENSES/pdfium.txt',
+                                  'fixture.dist-info/licenses/LICENSES/BSD-3-Clause.txt','fixture/module.py']
+            dist.locate_file.side_effect=lambda name:root/name
+            with patch.object(build_windows,'ROOT',root),patch.object(build_windows.sys,'base_prefix',str(root)),patch.object(build_windows,'distribution',return_value=dist):
+                build_windows.copy_licenses(target,['fixture'])
+            self.assertTrue((target/'licenses/build-tools/fixture/fixture.dist-info/licenses/BUILD_LICENSES/pdfium.txt').exists())
+            self.assertTrue((target/'licenses/build-tools/fixture/fixture.dist-info/licenses/LICENSES/BSD-3-Clause.txt').exists())
+            self.assertFalse((target/'licenses/build-tools/fixture/fixture/module.py').exists())

@@ -24,6 +24,8 @@ def main(argv=None):
     jan_kit.add_argument('--output',type=Path,required=True)
     jan_demo=sub.add_parser('jan-demo',help='JAN・物理PL固定日付デモ')
     jan_demo.add_argument('--output',type=Path,required=True)
+    pdf_demo=sub.add_parser('pdf-demo',help='PDF自動読取・確認・正式出力の架空固定日付デモ')
+    pdf_demo.add_argument('--output',type=Path,required=True)
     sub.add_parser('backup', help='バックアップのcreate / inspect / restore')
     test = sub.add_parser('self-test', help='架空データ・一時DBによる起動診断')
     test.add_argument('--output', type=Path, required=True)
@@ -49,6 +51,9 @@ def main(argv=None):
     elif parsed.command == 'jan-demo':
         from .jan_demo import main as run_jan
         run_jan(parsed.output)
+    elif parsed.command == 'pdf-demo':
+        from .pdf_demo import main as run_pdf
+        run_pdf(parsed.output)
     elif parsed.command == 'self-test':
         from .smoke import run_smoke
         print(json.dumps(run_smoke(parsed.output), ensure_ascii=True))
