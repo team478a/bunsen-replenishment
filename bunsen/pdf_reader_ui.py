@@ -8,7 +8,7 @@ import re
 
 from .core import DataError, LABELS, WAREHOUSES
 from .pdf_reader import read_report, suggested_quantity
-from .ui_theme import table_scrollbars, responsive_label
+from .ui_theme import table_scrollbars, responsive_label, scroll_page
 
 POLICIES={'空欄は未確認':'unknown','バラの空欄は0（確認済み）':'loose_zero','ケース・バラの空欄は0（確認済み）':'all_zero'}
 
@@ -19,7 +19,8 @@ class PDFInventoryDialog(tk.Toplevel):
         self.app=app;self.service=app.service;state=self.service.jan_master()
         self.products=state['products'];self.revision=state['revision'];self.reports={};self.items={};self.selection=None
         self.title('在庫PDFの読み取り・確認');self.geometry('1100x760');self.minsize(950,650);self.transient(app.root)
-        body=ttk.Frame(self,padding=14);body.pack(fill='both',expand=True)
+        page=ttk.Frame(self,padding=14);page.pack(fill='both',expand=True)
+        body=scroll_page(page)
         responsive_label(body,text='PDFを読み取り → 数量を確認・修正 → 保存。未確認の空欄は0にしません。CSVの倉庫コードは使わず、帳票内の営業所名で判定します。').pack(fill='x',pady=5)
         self.meta={};self.status={}
         for warehouse in WAREHOUSES:
