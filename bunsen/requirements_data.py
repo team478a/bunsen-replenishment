@@ -71,7 +71,7 @@ def inspect(folder, now, master_csvs=None):
     ignored = {'transit.csv','dry_stock.csv','vehicles.csv','warehouses.csv','policies.csv','replenishment.csv'}
     replacements = master_csvs or {}
     ignored.update(replacements)
-    if set(replacements)-{'products.csv','pallets.csv'}:
+    if set(replacements)-{'products.csv','pallets.csv','requirements.csv','common-settings.csv'}:
         raise DataError(['登録JANマスタの置換対象が不正です'])
     try:
         guard = SourceGuard(folder, ignored)
@@ -82,7 +82,15 @@ def inspect(folder, now, master_csvs=None):
             raw[REVIEW_FILE]=proof.decode('utf-8-sig').replace('\r\n','\n').replace('\r','\n')
             try:expected_forecast,_=verify_review(raw[REVIEW_FILE])
             except (ValueError,TypeError,KeyError,csv.Error) as exc:error('forecast-review','proof',str(exc))
-        allowed = {k+'.csv' for k in SCHEMA} | {'source_evidence.csv',REVIEW_FILE}
+        from .common_settings import FILE,parse,requirements
+        common=None
+        if FILE in replacements or (folder/FILE).exists():
+            content=replacements[FILE].encode('utf-8') if FILE in replacements else (folder/FILE).read_bytes()
+            if FILE not in replacements:guard.remember(folder/FILE,content)
+            raw[FILE]=content.decode('utf-8-sig').replace('\r\n','\n').replace('\r','\n')
+            common=parse(raw[FILE])
+            if stamp(common['saved_at'])>now:raise ValueError('共通条件の保存日時が未来です')
+        allowed = {k+'.csv' for k in SCHEMA} | {'source_evidence.csv',REVIEW_FILE,FILE}
         for filename in guard.initial:
             if filename.endswith('.csv') and filename not in allowed:
                 guard.remember(folder/filename,(folder/filename).read_bytes())
@@ -138,6 +146,7 @@ def inspect(folder, now, master_csvs=None):
         if expected_forecast is not None and raw.get('forecast.csv')!=expected_forecast:
             error('forecast','quantity_p','予測CSVと確認済み原本・採用列・倉庫対応が不一致です。再変換してください')
         products={r['product'] for r in tables['products']}
+        if common is not None and raw.get('requirements.csv')!=requirements(common,products):error('requirements',None,'共通補充条件と計算用の条件が不一致です')
         if not products:error('products','product','商品がありません')
         for table,rows in tables.items():
             for row in rows:

@@ -51,7 +51,7 @@ def copy_limited(source, destination, limit):
 
 
 def raw_digest(raw):
-    if not isinstance(raw, dict) or not raw or any(name not in {k + '.csv' for k in (SCHEMA.keys() | V2_SCHEMA.keys() | REQUIREMENTS_SCHEMA.keys() | {'source_evidence','forecast-review'})} or not isinstance(value, str) for name, value in raw.items()):
+    if not isinstance(raw, dict) or not raw or any(name not in {k + '.csv' for k in (SCHEMA.keys() | V2_SCHEMA.keys() | REQUIREMENTS_SCHEMA.keys() | {'source_evidence','forecast-review','common-settings'})} or not isinstance(value, str) for name, value in raw.items()):
         raise DataError(['取込原本の形式が不正'])
     return hashlib.sha256(json.dumps(raw, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
@@ -90,6 +90,7 @@ def validate_database(db):
         events = 0
         catalog_revision,catalog_products=0,{}
         jan_revision,jan_products=0,{}
+        common_revision,common_values=0,None
         for event_id, at, kind, content in db.execute('SELECT * FROM events ORDER BY id'):
             stamp(at)
             payload = json.loads(content)
@@ -97,6 +98,11 @@ def validate_database(db):
                 raise DataError(['操作イベントの形式が不正'])
             if kind == 'import' and raw_digest(payload.get('raw')) != payload.get('digest'):
                 raise DataError(['取込イベントの原本ハッシュが不一致'])
+            if kind=='common_settings_change':
+                from .common_settings import validate
+                after=validate(payload.get('after'))
+                if payload.get('before')!=common_values or payload.get('base_revision')!=common_revision or payload.get('acknowledged') is not True or any(not isinstance(payload.get(k),str) or not payload[k].strip() for k in ('operator','reason')):raise DataError(['共通補充条件の変更履歴が不整合'])
+                common_revision,common_values=event_id,after
             if kind == 'jan_master_change':
                 from .jan_catalog import validate_jan
                 products=payload.get('products')

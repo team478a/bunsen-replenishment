@@ -30,8 +30,11 @@ def main(output):
             pdf=kit/(w+'.pdf');pdf.write_bytes(fictional_report(w,date='2026/11/08',printed_day='2026/11/09'))
             stock.load(w,pdf);assert stock.meta[w]['as_of'].get()=='18:00:01';assert 'basis' not in stock.meta[w]
         with patch('bunsen.pdf_reader_ui.filedialog.askdirectory',return_value=str(target)):stock.save()
-        shutil.copyfile(kit/'csv/requirements.csv',target/'requirements.csv')
-        app.data=app.service.import_folder(target,workflow=2);app.day.set('2026-11-09');app.compute()
+        for key,value in dict(cycle_days=1,lead_days=0,safety_days=1,coverage_days=2).items():app.setting_values[key].set(str(value))
+        app.setting_reason.set('架空の全商品共通条件');app.confirmed_action(app.setting_checked,app.apply_settings)
+        assert not (target/'requirements.csv').exists()
+        app.data=app.service.import_folder(target,workflow=2,use_common_settings=True);app.day.set('2026-11-09');app.compute()
+        assert 'common-settings.csv' in app.data.raw
         assert [r['quantity_p'] for r in app.lines]==[240,480]
         assert all(r['timeline'][0]['date']=='2026-11-09' for r in app.lines)
         assert all(r['inventory_basis']=='closing' for r in app.lines)
@@ -39,6 +42,6 @@ def main(output):
         validate_database(app.service.db)
         manifest=create_backup(app.service.db,app.home,kit/'backup.zip',app.service.clock)
         restore_backup(kit/'backup.zip',kit/'restored',manifest['archive_sha256'],app.service.clock)
-        print('PASS: forecast before master, full-width CSV master, PDF footer time, closing basis, formal Excel/PDF, backup restore.')
+        print('PASS: forecast before master, CSV master, PDF footer time, common conditions without CSV, formal Excel/PDF, backup restore.')
     finally:app.close()
     return kit

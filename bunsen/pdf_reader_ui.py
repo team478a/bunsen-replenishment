@@ -152,8 +152,8 @@ class PDFInventoryDialog(tk.Toplevel):
         if not folder:return
         self.service.save_pdf_inventory(reports,decisions,self.app.operator.get(),True,self.revision,folder)
         self.app.invalidate();self.app.data=None
-        self.app.info.set('確認済み在庫CSV・商品PLマスタ・PDF原本証跡・修正履歴を保存しました。需要予測と補充条件CSVを配置して「データを開いて計算」へ進んでください。')
-        self.app.result_status.set('在庫PDFの確認・保存が完了しました。需要予測・補充条件と合わせてデータを開いてください。')
+        self.app.info.set('確認済み在庫CSV・商品PLマスタ・PDF原本証跡・修正履歴を保存しました。予測CSVを合わせ、「補充条件」で共通条件を保存して「データを開いて計算」へ進んでください。補充条件CSVは不要です。')
+        self.app.result_status.set('在庫PDFの確認・保存が完了しました。予測CSVを合わせ、画面で共通条件を保存してデータを開いてください。')
         self.destroy()
 
     def preview(self,warehouse):

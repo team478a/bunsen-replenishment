@@ -17,13 +17,14 @@ from .catalog import CatalogService, catalog_csv
 from .jan_catalog import JanCatalog, master_csvs
 from .requirements_data import active, PROFILE, NOTICE
 from .forecast_service import ForecastService
+from .common_settings import CommonSettings
 
 
 def encode(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
-class Service(ForecastService, JanCatalog, CatalogService):
+class Service(CommonSettings, ForecastService, JanCatalog, CatalogService):
     def __init__(self, db_path, clock=now_jst):
         self.clock = clock
         self.db_path = Path(db_path).resolve()
@@ -75,8 +76,18 @@ class Service(ForecastService, JanCatalog, CatalogService):
             self.db.execute('INSERT INTO events(at,kind,payload) VALUES(?,?,?)',
                             (self.clock().isoformat(), kind, encode(payload)))
 
-    def import_folder(self, folder, *, workflow=None, use_registered_products=False, use_registered_jan=False):
+    def import_folder(self, folder, *, workflow=None, use_registered_products=False, use_registered_jan=False,use_common_settings=False):
         self.ensure_writable()
+        if use_common_settings:
+            if workflow!=2 or use_registered_products:raise DataError(['共通条件はJAN・物理PL方式で使用してください'])
+            try:data=self.import_common_folder(folder,use_registered_jan)
+            except (DataError,OSError,ValueError,KeyError,csv.Error) as exc:
+                error=exc if isinstance(exc,DataError) else DataError(['在庫・予測・商品PLマスタを読み取れません: '+str(exc)])
+                self.event('import_failed',{'errors':error.errors});raise error
+            from .common_settings import FILE,parse
+            payload=dict(digest=data.digest,raw=data.raw,common_settings_revision=parse(data.raw[FILE])['revision'])
+            if data.jan_master_revision is not None:payload['jan_master_revision']=data.jan_master_revision
+            self.event('import',payload);return data
         try:
             if workflow == 2 and not any((Path(folder)/name).is_file() for name in ('replenishment.csv','requirements.csv')):
                 raise DataError(['replenishment.csv: 新方式の補充条件CSVが必要です。旧入力は履歴用です'])
@@ -233,6 +244,7 @@ class Service(ForecastService, JanCatalog, CatalogService):
             if date.fromisoformat(report['start']) < stamp(self.clock().isoformat()).date():
                 raise DataError(['過去日を含む配送予定は確定できません。新たに計算してください'])
             fresh=self.snapshot_data(saved['raw'],report['digest'])
+            self.assert_common_settings_current(fresh)
             verified=build_plan(fresh,date.fromisoformat(report['start']),stamp(report['calculated_at']),allow_provisional=report['allow_provisional'])
             for key,value in verified.items():
                 if report.get(key)!=value:raise DataError(['保存計画と原本再計算が一致しません'])
