@@ -67,10 +67,16 @@ class CommonSettings:
             replacements.update(master_csvs(master['products']));products=[p['product'] for p in master['products']]
         else:
             with (folder/'products.csv').open(encoding='utf-8-sig',newline='') as f:products=[r['product'] for r in csv.DictReader(f)]
+        scope=self.jan_master()
+        if scope['excluded']:
+            from .product_scope import FILE as SCOPE_FILE,text
+            products=[p for p in products if p not in scope['excluded']]
+            replacements[SCOPE_FILE]=text(scope)
         replacements.update({'requirements.csv':requirements(state,products),FILE:proof(state)})
         checked=inspect(folder,self.clock(),replacements)
         if checked.issues:raise DataError(checked.issues)
         data=checked.dataset
         if master:data.jan_master_revision=master['revision'];self.assert_jan_current(data)
         self.assert_common_settings_current(data)
+        self.assert_jan_current(data)
         return data

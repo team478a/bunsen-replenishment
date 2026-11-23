@@ -137,7 +137,7 @@ def suggested_quantity(row, blank_policy='unknown'):
     return cases*row['p_per_case']+loose
 
 
-def write_reviewed(reports, decisions, products, operator, folder):
+def write_reviewed(reports, decisions, products, operator, folder,scope=None):
     """Validate review and create a complete JAN inventory kit, without overwriting."""
     if not operator.strip() or set(reports)!=set(WAREHOUSES):raise DataError(['担当者・両倉庫の在庫PDFが必要です'])
     known={p['product'] for p in products}
@@ -176,6 +176,9 @@ def write_reviewed(reports, decisions, products, operator, folder):
     outputs=master_csvs(products)
     outputs.update({'inventory.csv':csv_text(SCHEMA['inventory'],inventory),'source_evidence.csv':csv_text(EVIDENCE,evidence)})
     review=dict(reader=READER_VERSION,operator=operator.strip(),reports=reports,decisions=audit)
+    if scope is not None:
+        from .product_scope import FILE,text
+        outputs[FILE]=text(scope);review['excluded_products']=scope['excluded']
     outputs['pdf-review.json']=json.dumps(review,ensure_ascii=False,indent=2)
     created=[]
     try:

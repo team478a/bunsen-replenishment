@@ -71,7 +71,7 @@ def inspect(folder, now, master_csvs=None):
     ignored = {'transit.csv','dry_stock.csv','vehicles.csv','warehouses.csv','policies.csv','replenishment.csv'}
     replacements = master_csvs or {}
     ignored.update(replacements)
-    if set(replacements)-{'products.csv','pallets.csv','requirements.csv','common-settings.csv'}:
+    if set(replacements)-{'products.csv','pallets.csv','requirements.csv','common-settings.csv','product-scope.csv'}:
         raise DataError(['登録JANマスタの置換対象が不正です'])
     try:
         guard = SourceGuard(folder, ignored)
@@ -83,6 +83,12 @@ def inspect(folder, now, master_csvs=None):
             try:expected_forecast,_=verify_review(raw[REVIEW_FILE])
             except (ValueError,TypeError,KeyError,csv.Error) as exc:error('forecast-review','proof',str(exc))
         from .common_settings import FILE,parse,requirements
+        from .product_scope import FILE as SCOPE_FILE,parse as parse_scope
+        scope=None
+        if SCOPE_FILE in replacements or (folder/SCOPE_FILE).exists():
+            content=replacements[SCOPE_FILE].encode('utf-8') if SCOPE_FILE in replacements else (folder/SCOPE_FILE).read_bytes()
+            if SCOPE_FILE not in replacements:guard.remember(folder/SCOPE_FILE,content)
+            raw[SCOPE_FILE]=content.decode('utf-8-sig').replace('\r\n','\n').replace('\r','\n');scope=parse_scope(raw[SCOPE_FILE])
         common=None
         if FILE in replacements or (folder/FILE).exists():
             content=replacements[FILE].encode('utf-8') if FILE in replacements else (folder/FILE).read_bytes()
@@ -90,7 +96,7 @@ def inspect(folder, now, master_csvs=None):
             raw[FILE]=content.decode('utf-8-sig').replace('\r\n','\n').replace('\r','\n')
             common=parse(raw[FILE])
             if stamp(common['saved_at'])>now:raise ValueError('共通条件の保存日時が未来です')
-        allowed = {k+'.csv' for k in SCHEMA} | {'source_evidence.csv',REVIEW_FILE,FILE}
+        allowed = {k+'.csv' for k in SCHEMA} | {'source_evidence.csv',REVIEW_FILE,FILE,SCOPE_FILE}
         for filename in guard.initial:
             if filename.endswith('.csv') and filename not in allowed:
                 guard.remember(folder/filename,(folder/filename).read_bytes())
@@ -145,6 +151,8 @@ def inspect(folder, now, master_csvs=None):
                 info['status']='read_error';error(table,'file',f'読取不能: {exc}')
         if expected_forecast is not None and raw.get('forecast.csv')!=expected_forecast:
             error('forecast','quantity_p','予測CSVと確認済み原本・採用列・倉庫対応が不一致です。再変換してください')
+        if scope:
+            for table,rows in tables.items():tables[table]=[r for r in rows if r['product'] not in scope['excluded']]
         products={r['product'] for r in tables['products']}
         if common is not None and raw.get('requirements.csv')!=requirements(common,products):error('requirements',None,'共通補充条件と計算用の条件が不一致です')
         if not products:error('products','product','商品がありません')

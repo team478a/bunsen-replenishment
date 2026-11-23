@@ -53,9 +53,11 @@ class ForecastDialog(tk.Toplevel):
         days=[r['date'] for r in report['rows']]
         self.status.set(f"{len(report['rows'])}行 / {len({r['product'] for r in report['rows']})}JAN / {min(days) if days else '?'}〜{max(days) if days else '?'} / 不備{len(report['errors'])}件")
         self.show_details('\n'.join(report['errors']) if report['errors'] else '数量列: '+QUANTITY+'\n大口・特売・注文・製造・入庫は別加算しません。現在庫は在庫PDFを使用します。\n前回確認した倉庫対応がある場合だけ表示します。初回の対応は未設定です。未確定予測は保存しても正式指示に使用できません。')
-        known={p['product'] for p in self.service.jan_master()['products']}
+        master=self.service.jan_master();known={p['product'] for p in master['all_products']}
         missing=sorted({r['product'] for r in report['rows']}-known)
         if missing:self.show_details(self.detail.get('1.0','end').strip()+'\n警告: JANマスタ未登録（取込可、計算前に登録）: '+', '.join(missing))
+        inactive=sorted({r['product'] for r in report['rows']}&set(master['excluded']))
+        if inactive:self.show_details(self.detail.get('1.0','end').strip()+'\n補充対象外（原本は保持し、計算から除外）: '+', '.join(inactive))
         self.update_ready()
 
     def mapping(self):
@@ -78,7 +80,7 @@ class ForecastDialog(tk.Toplevel):
         if not folder:return
         self.service.save_forecast_csv(self.report,self.mapping(),self.app.operator.get(),True,self.master_revision,self.mapping_revision,folder)
         self.app.invalidate();self.app.data=None
-        missing=sorted({r['product'] for r in self.report['rows']}-{p['product'] for p in self.service.jan_master()['products']})
+        missing=sorted({r['product'] for r in self.report['rows']}-{p['product'] for p in self.service.jan_master()['all_products']})
         warning=' 未登録JAN: '+', '.join(missing)+'。「管理・その他」→「JAN・倉庫別PLマスタ」で登録してください。' if missing else ''
         self.app.info.set('予測CSVと原本・倉庫対応の確認証跡を保存しました。'+warning)
         self.app.result_status.set('予測CSVの取込完了。'+warning if warning else '予測CSVの準備が完了しました。在庫CSVを合わせ、画面で共通条件を保存してデータを開いてください。')

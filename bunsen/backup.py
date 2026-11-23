@@ -51,7 +51,7 @@ def copy_limited(source, destination, limit):
 
 
 def raw_digest(raw):
-    if not isinstance(raw, dict) or not raw or any(name not in {k + '.csv' for k in (SCHEMA.keys() | V2_SCHEMA.keys() | REQUIREMENTS_SCHEMA.keys() | {'source_evidence','forecast-review','common-settings'})} or not isinstance(value, str) for name, value in raw.items()):
+    if not isinstance(raw, dict) or not raw or any(name not in {k + '.csv' for k in (SCHEMA.keys() | V2_SCHEMA.keys() | REQUIREMENTS_SCHEMA.keys() | {'source_evidence','forecast-review','common-settings','product-scope'})} or not isinstance(value, str) for name, value in raw.items()):
         raise DataError(['取込原本の形式が不正'])
     return hashlib.sha256(json.dumps(raw, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
@@ -90,6 +90,7 @@ def validate_database(db):
         events = 0
         catalog_revision,catalog_products=0,{}
         jan_revision,jan_products=0,{}
+        jan_excluded={}
         common_revision,common_values=0,None
         for event_id, at, kind, content in db.execute('SELECT * FROM events ORDER BY id'):
             stamp(at)
@@ -106,9 +107,32 @@ def validate_database(db):
             if kind == 'jan_master_change':
                 from .jan_catalog import validate_jan
                 products=payload.get('products')
-                if not isinstance(products,list) or not products or any(not isinstance(p,dict) for p in products):raise DataError(['JAN・PLマスタの形式が不正'])
+                if not isinstance(products,list) or (not products and payload.get('source')!='reset') or any(not isinstance(p,dict) for p in products):raise DataError(['JAN・PLマスタの形式が不正'])
                 checked=[validate_jan(p) for p in products]
                 current={p['product']:p for p in checked}
+                if len(current)!=len(checked) or checked!=products:raise DataError(['JANマスタの重複・形式不整合があります'])
+                from .product_scope import validate as validate_scope
+                excluded=validate_scope(payload.get('excluded',{}),set(current))
+                if payload.get('source')=='reset':
+                    archive=payload.get('backup',{})
+                    if (current or excluded or not jan_products or payload.get('before')!=sorted(jan_products.values(),key=lambda p:p['product'])
+                        or payload.get('before_excluded')!=jan_excluded or payload.get('base_revision')!=jan_revision or payload.get('acknowledged') is not True
+                        or any(not isinstance(payload.get(k),str) or not payload[k].strip() for k in ('operator','reason'))
+                        or not isinstance(archive,dict) or not isinstance(archive.get('path'),str) or not archive['path']
+                        or not isinstance(archive.get('sha256'),str) or len(archive['sha256'])!=64 or any(c not in '0123456789abcdef' for c in archive['sha256'])):raise DataError(['JAN初期化の履歴・バックアップ記録が不整合'])
+                    jan_revision,jan_products,jan_excluded=event_id,current,excluded;events+=1;continue
+                if payload.get('source')=='scope_change':
+                    targets=payload.get('targets');active=payload.get('active')
+                    if (not isinstance(targets,list) or not targets or len(set(targets))!=len(targets) or set(targets)-set(jan_products) or type(active) is not bool
+                        or current!=jan_products or payload.get('before_excluded')!=jan_excluded
+                        or payload.get('base_revision')!=jan_revision or payload.get('acknowledged') is not True
+                        or any(not isinstance(payload.get(k),str) or not payload[k].strip() for k in ('operator','reason'))):raise DataError(['JAN対象変更の履歴が不整合'])
+                    expected=dict(jan_excluded)
+                    for p in targets:
+                        if active:expected.pop(p,None)
+                        else:expected[p]=dict(operator=payload['operator'],reason=payload['reason'])
+                    if excluded!=expected:raise DataError(['JAN対象外の変更内容が不一致'])
+                    jan_revision,jan_products,jan_excluded=event_id,current,excluded;events+=1;continue
                 after=payload.get('after');before=payload.get('before')
                 if payload.get('source')=='csv_import':
                     import base64
@@ -117,23 +141,25 @@ def validate_database(db):
                     fresh=analyse(base64.b64decode(report['source_base64'],validate=True))
                     incoming={p['product']:p for p in fresh['products']}
                     changes=[dict(before=jan_products.get(p['product']),after=p) for p in fresh['products']]
+                    from .product_scope import csv_excluded
+                    expected_excluded=csv_excluded(dict(excluded=jan_excluded,all_products=list(jan_products.values())),set(incoming),payload.get('operator',''),payload.get('reason',''),payload.get('mode','merge'))
                     if (fresh['errors'] or any(report.get(k)!=v for k,v in fresh.items())
                         or before!=sorted(jan_products.values(),key=lambda p:p['product']) or after!=fresh['products']
-                        or current!={**jan_products,**incoming} or payload.get('changes')!=changes
+                        or current!={**jan_products,**incoming} or payload.get('changes')!=changes or excluded!=expected_excluded
                         or payload.get('base_revision')!=jan_revision or payload.get('acknowledged') is not True
                         or not isinstance(payload.get('operator'),str) or not payload['operator'].strip()
                         or not isinstance(payload.get('reason'),str) or not payload['reason'].strip()):raise DataError(['JAN CSV取込履歴が不整合'])
-                    jan_revision,jan_products=event_id,current
+                    jan_revision,jan_products,jan_excluded=event_id,current,excluded
                     events+=1
                     continue
-                if (not checked or len(current)!=len(checked) or not isinstance(after,dict)
+                if (not checked or len(current)!=len(checked) or not isinstance(after,dict) or excluded!=jan_excluded
                     or payload.get('base_revision')!=jan_revision or payload.get('acknowledged') is not True
                     or not isinstance(payload.get('operator'),str) or not payload['operator'].strip()
                     or not isinstance(payload.get('reason'),str) or not payload['reason'].strip()
                     or current.get(after.get('product'))!=after or jan_products.get(after.get('product'))!=before
                     or current!={**jan_products,after['product']:after}):
                     raise DataError(['JAN・PLマスタ変更履歴が不整合'])
-                jan_revision,jan_products=event_id,current
+                jan_revision,jan_products,jan_excluded=event_id,current,excluded
             if kind == 'product_master_change':
                 from .catalog import validate_product
                 products=payload.get('products')

@@ -15,14 +15,15 @@ class JanCatalogUI:
         ttk.Label(self.jan_tab,text='JAN・倉庫別の物理PLマスタ',font=('Yu Gothic UI',18,'bold')).pack(anchor='w')
         responsive_label(self.jan_tab,text=NOTICE+' 1PLあたりPは、確認済みの物理パレット1枚の数量を入力します。').pack(fill='x',pady=6)
         responsive_label(self.jan_tab,text='品名は全角英数・日本語を使用できます。JAN・期限日数・PLのP数は半角数字で入力してください。CSVは「CSV取込・ひな形」から登録できます。').pack(fill='x',pady=3)
+        responsive_label(self.jan_tab,text='一覧のJANを選ぶと上書き編集できます。不要な商品は「対象外にする（削除）」で補充対象から外し、後から戻せます。過去の指示・登録履歴は消しません。').pack(fill='x',pady=3)
         bar=ttk.Frame(self.jan_tab);bar.pack(fill='x')
         ttk.Button(bar,text='新規JAN',command=self.new_jan).pack(side='left',padx=4)
         self.write_button(bar,text='CSV取込・ひな形',command=self.jan_csv_dialog).pack(side='left',padx=4)
         ttk.Button(bar,text='最新一覧',command=lambda:self.refresh_jan_master(True)).pack(side='left',padx=4)
         ttk.Button(bar,text='商品・PLマスタCSVを新規出力',command=lambda:self.run(self.export_jan)).pack(side='left',padx=4)
         listing=ttk.Frame(self.jan_tab);listing.pack(fill='x',pady=6)
-        self.jan_tree=ttk.Treeview(listing,columns=('jan','name','kobe','sugito','expiry'),show='headings',height=4,selectmode='browse')
-        for key,label,width in zip(self.jan_tree['columns'],('JAN','品名','神戸P/物理PL','杉戸P/物理PL','期限'),(170,350,160,160,240)):
+        self.jan_tree=ttk.Treeview(listing,columns=('jan','name','kobe','sugito','expiry','active'),show='headings',height=4,selectmode='browse')
+        for key,label,width in zip(self.jan_tree['columns'],('JAN','品名','神戸P/物理PL','杉戸P/物理PL','期限','補充対象'),(170,300,150,150,100,100)):
             self.jan_tree.heading(key,text=label);self.jan_tree.column(key,width=width)
         table_scrollbars(self.jan_tree);self.jan_tree.bind('<<TreeviewSelect>>',self.select_jan)
         self.jan_values={};form=ttk.Frame(self.jan_tab);form.pack(fill='x')
@@ -43,6 +44,11 @@ class JanCatalogUI:
             ttk.Label(author,text=label).pack(side='left');ttk.Entry(author,textvariable=var,width=width).pack(side='left',padx=4)
             var.trace_add('write',lambda *_:self.jan_ack.set(False))
         self.write_button(self.jan_tab,text='確認済みJAN・PLマスタを保存',style='Primary.TButton',command=lambda:self.run(lambda:self.confirmed_action(self.jan_ack,self.save_jan))).pack(anchor='w',pady=6)
+        scope_bar=ttk.Frame(self.jan_tab);scope_bar.pack(fill='x',pady=5)
+        self.write_button(scope_bar,text='選択JANを対象外にする（削除）',command=lambda:self.run(lambda:self.change_jan_scope(False))).pack(side='left',padx=4)
+        self.write_button(scope_bar,text='選択JANを対象に戻す',command=lambda:self.run(lambda:self.change_jan_scope(True))).pack(side='left',padx=4)
+        self.write_button(self.jan_tab,text='全JANマスタを初期化（バックアップを保存）',command=self.reset_jan_dialog).pack(anchor='w',pady=5)
+        responsive_label(self.jan_tab,text='検証を最初からやり直す場合は「全JANマスタを初期化」で対象外を含めて現在の一覧を空にできます。発行履歴は残します。データ全体を分ける場合は「データ保存先・空のデータで検証」を使います。').pack(fill='x',pady=4)
         self.jan_status=tk.StringVar();responsive_label(self.jan_tab,textvariable=self.jan_status).pack(fill='x')
         self.use_registered_jan=tk.BooleanVar(value=False)
         mode=ttk.Frame(self.daily);self.jan_master_mode=mode;mode.pack(fill='x',before=self.tree.master)
@@ -68,11 +74,21 @@ class JanCatalogUI:
         if not force and self.jan_revision==state['revision'] and self.jan_db==self.service.db_path:return
         if self.jan_db is not None and self.jan_db!=self.service.db_path:
             self.use_registered_jan.set(False);self.jan_operator.set('')
-        self.jan_db=self.service.db_path;self.jan_revision=state['revision'];self.jan_products=state['products']
+        self.jan_db=self.service.db_path;self.jan_revision=state['revision'];self.jan_products=state['all_products']
         self.jan_tree.delete(*self.jan_tree.get_children())
         for p in self.jan_products:
-            self.jan_tree.insert('','end',iid=p['product'],values=(p['product'],p['name'],p['kobe_p_per_pl'],p['sugito_p_per_pl'],p['shelf_life_days']))
-        self.new_jan();self.jan_status.set(f'{len(self.jan_products)} JAN / 登録版 {self.jan_revision}。未確認の値は登録せず、整備してから取込してください。')
+            self.jan_tree.insert('','end',iid=p['product'],values=(p['product'],p['name'],p['kobe_p_per_pl'],p['sugito_p_per_pl'],p['shelf_life_days'],'対象外' if p['product'] in state['excluded'] else '対象'))
+        self.new_jan();self.jan_status.set(f"対象{len(state['products'])}件 / 対象外{len(state['excluded'])}件 / 登録版 {self.jan_revision}。対象外の登録情報と履歴も保持します。")
+
+    def change_jan_scope(self,active):
+        if self.jan_edit is None:raise DataError(['対象を変更するJANを一覧から選んでください'])
+        self.service.set_jan_active([self.jan_edit],active,self.operator.get(),self.jan_reason.get(),True,self.jan_revision)
+        self.invalidate();self.invalidate_diagnostic();self.data=None;self.refresh_jan_master(True)
+        self.info.set('補充対象の設定を保存しました。在庫PDF・予測を再取込して計算してください。過去履歴は保持しています。')
+
+    def reset_jan_dialog(self):
+        from .storage_ui import MasterResetDialog
+        return MasterResetDialog(self)
 
     def new_jan(self):
         self.jan_edit=None;self.jan_code.configure(state='normal')
