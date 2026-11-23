@@ -23,17 +23,15 @@ class ForecastService:
         try:
             with self.db:
                 self.db.execute('BEGIN IMMEDIATE');master=self.jan_master();previous=self.forecast_mapping()
-                if type(master_revision) is not int or master['revision']!=master_revision:raise DataError(['JANマスタが更新されました。予測確認画面を開き直してください'])
                 if type(mapping_revision) is not int or previous['revision']!=mapping_revision:raise DataError(['倉庫コード対応が更新されました。予測確認画面を開き直してください'])
                 known={p['product'] for p in master['products']}
                 missing=sorted({r['product'] for r in report['rows']}-known)
-                if missing:raise DataError(['予測CSVに未登録JANがあります: '+', '.join(missing)])
                 for name,text in outputs.items():
                     path=Path(folder)/name
                     with path.open('x',encoding='utf-8-sig',newline='') as stream:created.append(path);stream.write(text)
                 payload=dict(format=FORMAT,mapping=mapping,before_mapping=previous['mapping'],operator=operator.strip(),
                              acknowledged=True,master_revision=master_revision,previous_mapping_revision=mapping_revision,
-                             report=report,proof=proof,outputs=outputs)
+                             report=report,proof=proof,outputs=outputs,unregistered_jans=missing)
                 self.db.execute('INSERT INTO events(at,kind,payload) VALUES(?,?,?)',
                                 (self.clock().isoformat(),'forecast_csv_review',encode(payload)))
         except Exception:

@@ -7,7 +7,7 @@ import zipfile
 import re
 
 from .core import DataError, LABELS, WAREHOUSES
-from .pdf_reader import read_report, suggested_quantity
+from .pdf_reader import read_report, suggested_quantity, printed_time
 from .ui_theme import table_scrollbars, responsive_label, scroll_page
 
 POLICIES={'空欄は未確認':'unknown','バラの空欄は0（確認済み）':'loose_zero','ケース・バラの空欄は0（確認済み）':'all_zero'}
@@ -29,10 +29,10 @@ class PDFInventoryDialog(tk.Toplevel):
             self.status[warehouse]=tk.StringVar(value='未読取')
             ttk.Label(frame,textvariable=self.status[warehouse]).grid(row=0,column=1,columnspan=6,sticky='w')
             ttk.Button(frame,text='原本を見る',command=lambda w=warehouse:self.app.run(lambda:self.preview(w))).grid(row=0,column=7,padx=3)
-            values={k:tk.StringVar() for k in ('as_of','basis','policy')};values['policy'].set('空欄は未確認');self.meta[warehouse]=values
-            ttk.Label(frame,text='在庫基準時刻（HH:MM）').grid(row=1,column=0,sticky='w')
+            values={k:tk.StringVar() for k in ('as_of','policy')};values['policy'].set('空欄は未確認');self.meta[warehouse]=values
+            ttk.Label(frame,text='基準時刻（PDF左下を初期表示）').grid(row=1,column=0,sticky='w')
             ttk.Entry(frame,textvariable=values['as_of'],width=12).grid(row=1,column=1,padx=4)
-            ttk.Combobox(frame,textvariable=values['basis'],values=('始業','終業'),state='readonly',width=6).grid(row=1,column=2,padx=3)
+            ttk.Label(frame,text='集計日まで反映済み・翌日から需要計算').grid(row=2,column=0,columnspan=8,sticky='w')
             ttk.Label(frame,text='空欄の意味').grid(row=1,column=3)
             picker=ttk.Combobox(frame,textvariable=values['policy'],values=list(POLICIES),state='readonly',width=32);picker.grid(row=1,column=4,columnspan=4,padx=3)
             picker.bind('<<ComboboxSelected>>',lambda _,w=warehouse:self.app.run(lambda:self.change_policy(w)))
@@ -84,7 +84,7 @@ class PDFInventoryDialog(tk.Toplevel):
             if report['warehouse']!=warehouse:raise DataError([LABELS[warehouse]+'の欄ですが、PDFは'+LABELS[report['warehouse']]+'です'])
             self.reports[warehouse]=report
             self.status[warehouse].set(f"集計日 {report['stock_date']} / {report['pages']}ページ / 作成 {report['printed_at']}")
-            self.meta[warehouse]['as_of'].set('');self.meta[warehouse]['basis'].set('');self.meta[warehouse]['policy'].set('空欄は未確認')
+            self.meta[warehouse]['as_of'].set(printed_time(report));self.meta[warehouse]['policy'].set('空欄は未確認')
             self.populate(warehouse)
         except Exception:
             self.status[warehouse].set('読取できませんでした。PDFを選び直してください');raise
@@ -143,11 +143,10 @@ class PDFInventoryDialog(tk.Toplevel):
         from .core import stamp
         for w,r in self.reports.items():
             text=self.meta[w]['as_of'].get().strip()
-            at=r['stock_date']+'T'+text+':00+09:00' if re.fullmatch(r'\d{2}:\d{2}',text) else text
+            at=r['stock_date']+'T'+text+(':00' if len(text)==5 else '')+'+09:00' if re.fullmatch(r'\d{2}:\d{2}(?::\d{2})?',text) else text
             try:stamp(at)
             except ValueError:raise DataError([LABELS[w]+': 確認済み在庫基準時刻をHH:MMで入力してください'])
-            if self.meta[w]['basis'].get() not in ('始業','終業'):raise DataError([LABELS[w]+': 始業・終業を指定してください'])
-            reports[w]=dict(report=r,as_of=at,basis={'始業':'opening','終業':'closing'}[self.meta[w]['basis'].get()],blank_policy=POLICIES[self.meta[w]['policy'].get()])
+            reports[w]=dict(report=r,as_of=at,basis='closing',time_origin='pdf_footer' if text==printed_time(r) else 'manual',blank_policy=POLICIES[self.meta[w]['policy'].get()])
         decisions={key:dict(quantity_p=item['quantity'],reason=item['reason']) for key,item in self.items.items() if item['target']}
         folder=filedialog.askdirectory(parent=self,title='確認済み在庫CSVの新規保存先')
         if not folder:return

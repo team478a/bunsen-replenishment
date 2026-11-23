@@ -104,6 +104,22 @@ def validate_database(db):
                 checked=[validate_jan(p) for p in products]
                 current={p['product']:p for p in checked}
                 after=payload.get('after');before=payload.get('before')
+                if payload.get('source')=='csv_import':
+                    import base64
+                    from .jan_csv import analyse
+                    report=payload.get('csv_report',{})
+                    fresh=analyse(base64.b64decode(report['source_base64'],validate=True))
+                    incoming={p['product']:p for p in fresh['products']}
+                    changes=[dict(before=jan_products.get(p['product']),after=p) for p in fresh['products']]
+                    if (fresh['errors'] or any(report.get(k)!=v for k,v in fresh.items())
+                        or before!=sorted(jan_products.values(),key=lambda p:p['product']) or after!=fresh['products']
+                        or current!={**jan_products,**incoming} or payload.get('changes')!=changes
+                        or payload.get('base_revision')!=jan_revision or payload.get('acknowledged') is not True
+                        or not isinstance(payload.get('operator'),str) or not payload['operator'].strip()
+                        or not isinstance(payload.get('reason'),str) or not payload['reason'].strip()):raise DataError(['JAN CSV取込履歴が不整合'])
+                    jan_revision,jan_products=event_id,current
+                    events+=1
+                    continue
                 if (not checked or len(current)!=len(checked) or not isinstance(after,dict)
                     or payload.get('base_revision')!=jan_revision or payload.get('acknowledged') is not True
                     or not isinstance(payload.get('operator'),str) or not payload['operator'].strip()

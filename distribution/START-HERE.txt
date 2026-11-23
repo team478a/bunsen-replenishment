@@ -1,40 +1,35 @@
-JAN・物理PL方式（0.5.0-preview.1）
-新方式の手順は docs/jan-pl-contract.md を参照してください。
-JAN単位・神戸/杉戸別の物理1PL数量を使い、入庫/輸送中は計算対象外です。
-報告PDFは原本証跡と確認転記を使います。PDF数量の自動抽出はありません。
-BunsenTools.exe jan-kit --dispatch 試験日YYYY-MM-DD --output 新規試用フォルダー
-BunsenReplenishment.exe --data-dir 新規試用フォルダー\home
-架空キットのcsvを取り込みます。実資料の未確認値は自動登録されません。
-以下のreplenishment.csv方式の案内は従来v2互換用です。
+ブンセン補充出荷指示アプリ 0.7.1-preview.1
 
-ブンセン 補充出荷指示アプリ — 署名なし試用版
+最初に、同じフォルダーの「操作マニュアル.pdf」（8ページ）を開いてください。
+ZIP全体を新しいフォルダーへ展開してBunsenReplenishment.exeを起動します。
+exeだけでなく_internal・docs・samples等も一緒に保管してください。
+PythonやExcel本体の追加インストールは不要です。
 
-1. ZIP全体を新しいフォルダーへ展開してください。
-2. BunsenReplenishment.exe を起動してください。
-3. exeだけでなく _internal・samples・docs も一緒に保管してください。
+管理・その他 → JAN・倉庫別PLマスタ → CSV取込・ひな形
+で、全角英数の品名を保持したCSV一括登録ができます。
+6列の空ひな形はsamples/jan-master-template.csvにもあります。
+列: JAN,品名,期限種別,製造からの期限日数,神戸1PLのP数,杉戸1PLのP数
+確認済みの数値・期限だけを登録してください。
 
-Pythonやpipの追加インストールは不要です。管理者権限は要求しません。
-業務データは %LOCALAPPDATA%/BunsenReplenishment に保存します。
-この配布物には架空サンプルだけを含みます。実CSV接続・業務承認は未完了です。
+予測CSVはマスタ未登録でも警告付きで先に保存できます。
+後からJANマスタ登録 → 在庫PDFを確認保存 → 承認済み補充条件を配置 →
+データを開いて計算 → 数量確認・修正 → 確定してExcel・PDF出力 と進めます。
+在庫PDFは左下の作成時刻を初期表示し手修正できます。
+在庫集計日まで反映済みとして、翌日から需要を差し引きます。
+PDFの作成日と在庫集計日は別に保持します。始業・終業の選択はありません。
+管理メニューに「補充条件」を表示し、旧v2商品マスタを隠しています。
 
-更新前はアプリのバックアップ機能で履歴を保存し、すべての旧画面を閉じてください。
-新しい版は別フォルダーへ展開し、上書き・フォルダー混在は避けてください。
-試用版のまま本番利用したり、署名警告を回避するため保護機能を無効にしたりしないでください。
-端末の保護機能で止まった場合は、管理担当者が配布元・ハッシュ・方針を確認してください。
+最新方式はJAN単位・整数物理PL出荷です。大口・特売は別加算しません。
+ブンセン在庫・製造・確定入庫・輸送中は計算対象外です。
+必要なJAN・PLマスタ、在庫、予測、補充条件が不足する正式発行は停止します。
+外部倉庫コードは確認済みの対応を指定してください。未設定では保存できません。
 
-導入・更新・診断：docs/windows-distribution.md
-バックアップ・閲覧専用復元：docs/backup-restore.md
+履歴の通常保存先: %LOCALAPPDATA%/BunsenReplenishment
+更新前にバックアップを取得し、旧アプリを閉じ、新版は別フォルダーへ展開します。
+復元履歴は閲覧専用です。元CSV・別保存先の帳票も保管してください。
+署名なし試用版です。実業務の設定・現場受入・本番配布承認は別途必要です。
+保護機能で停止した場合は管理担当者へ確認し、保護機能を無効にしないでください。
+samplesは架空例です。本番の設定値として使用しないでください。
 
-診断例（業務DBには接続せず、架空データと一時DBを使用）：
-  BunsenTools.exe self-test --output C:\test\bunsen-result.json
-固定日付デモ：
-  BunsenTools.exe demo --output C:\test\bunsen-demo
-復旧用CLI：
-  BunsenTools.exe backup inspect C:\backup\bunsen.zip
-
-署名証明書・発行元・本番配布承認・現場PCでの受入試験は別途必要です。
-
-現行の新規業務はムロオ必要補充方式です。ブンセン在庫・朝照合は不要です。
-取込→分析→結果→判定/確定→出力の順に操作し、倉庫別Excel/PDFを直接生成します。
-samples/replenishmentは架空例です。旧CSVは履歴用で、新規業務には使いません。
-新規試用は BunsenTools.exe acceptance-kit --dispatch YYYY-MM-DD --output 新規フォルダー から作成できます。
+詳しい説明: docs/master-workflow-fixes.md / docs/forecast-csv-import.md /
+docs/pdf-inventory-reader.md / docs/windows-distribution.md / docs/backup-restore.md

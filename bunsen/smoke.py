@@ -138,6 +138,9 @@ def run_smoke(output):
         from .forecast_demo import main as run_forecast
         run_forecast(home/'forecast-kit')
         checks.append('base_forecast_decimal_import')
+        from .workflow_demo import main as run_workflow
+        run_workflow(home/'workflow-kit')
+        checks.append('master_csv_forecast_first_pdf_time')
     result = dict(version=__version__, frozen=bool(getattr(sys, 'frozen', False)),
                   executable=Path(sys.executable).name, checks=checks, success=True)
     output.parent.mkdir(parents=True, exist_ok=True)

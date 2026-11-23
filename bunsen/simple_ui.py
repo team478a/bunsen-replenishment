@@ -90,6 +90,11 @@ class SimpleUI:
         self.simple_history=tk.Listbox(self.history_page,height=15);self.simple_history.pack(fill='both',expand=True)
         ttk.Button(self.history_page,text='選択した指示をExcel・PDF出力',command=lambda:self.run(self.export_history)).pack(anchor='w',pady=8)
         self.admin_pages=[p for p in self.tabs.tabs() if p not in (self.primary_page,str(self.history_page))]
+        legacy_page=str(self.master_tab.master.master)
+        self.admin_pages=[p for p in self.admin_pages if p!=legacy_page]
+        self.tabs.hide(legacy_page)
+        self.management_page=str(self.settings.master.master.master)
+        self.tabs.tab(self.management_page,text='補充条件')
         menu=tk.Menu(self.root);admin=tk.Menu(menu,tearoff=False);menu.add_cascade(label='管理・その他',menu=admin)
         for page in self.admin_pages:
             label=self.tabs.tab(page,'text')

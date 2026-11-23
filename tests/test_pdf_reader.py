@@ -150,7 +150,9 @@ class PDFReaderTests(unittest.TestCase):
             dialog=PDFInventoryDialog(app)
             for warehouse in ('KOBE','SUGITO'):
                 source=self.path/(warehouse+'.pdf');source.write_bytes(fixture(warehouse));dialog.load(warehouse,source)
-                dialog.meta[warehouse]['as_of'].set('18:00');dialog.meta[warehouse]['basis'].set('終業')
+                self.assertEqual(dialog.meta[warehouse]['as_of'].get(),'18:00:01')
+                self.assertNotIn('basis',dialog.meta[warehouse])
+                dialog.meta[warehouse]['as_of'].set('18:00')
             with patch('bunsen.pdf_reader_ui.filedialog.askdirectory',return_value=''):dialog.save()
             self.assertEqual(app.service.db.execute("SELECT count(*) FROM events WHERE kind='pdf_inventory_review'").fetchone()[0],0)
             target=self.path/'outputs';target.mkdir()
