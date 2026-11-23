@@ -47,6 +47,8 @@ class JanCatalogUI:
         scope_bar=ttk.Frame(self.jan_tab);scope_bar.pack(fill='x',pady=5)
         self.write_button(scope_bar,text='選択JANを対象外にする（削除）',command=lambda:self.run(lambda:self.change_jan_scope(False))).pack(side='left',padx=4)
         self.write_button(scope_bar,text='選択JANを対象に戻す',command=lambda:self.run(lambda:self.change_jan_scope(True))).pack(side='left',padx=4)
+        self.write_button(self.jan_tab,text='全JANマスタを初期化（バックアップを保存）',command=self.reset_jan_dialog).pack(anchor='w',pady=5)
+        responsive_label(self.jan_tab,text='検証を最初からやり直す場合は「全JANマスタを初期化」で対象外を含めて現在の一覧を空にできます。発行履歴は残します。データ全体を分ける場合は「データ保存先・空のデータで検証」を使います。').pack(fill='x',pady=4)
         self.jan_status=tk.StringVar();responsive_label(self.jan_tab,textvariable=self.jan_status).pack(fill='x')
         self.use_registered_jan=tk.BooleanVar(value=False)
         mode=ttk.Frame(self.daily);self.jan_master_mode=mode;mode.pack(fill='x',before=self.tree.master)
@@ -83,6 +85,10 @@ class JanCatalogUI:
         self.service.set_jan_active([self.jan_edit],active,self.operator.get(),self.jan_reason.get(),True,self.jan_revision)
         self.invalidate();self.invalidate_diagnostic();self.data=None;self.refresh_jan_master(True)
         self.info.set('補充対象の設定を保存しました。在庫PDF・予測を再取込して計算してください。過去履歴は保持しています。')
+
+    def reset_jan_dialog(self):
+        from .storage_ui import MasterResetDialog
+        return MasterResetDialog(self)
 
     def new_jan(self):
         self.jan_edit=None;self.jan_code.configure(state='normal')

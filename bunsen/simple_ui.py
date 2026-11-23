@@ -101,6 +101,7 @@ class SimpleUI:
             admin.add_command(label=label,command=lambda p=page:self.open_admin(p))
             self.tabs.hide(page)
         admin.add_separator();admin.add_command(label='在庫PDFを読み取り・確認',command=self.pdf_inventory_dialog)
+        admin.add_command(label='データ保存先・空のデータで検証',command=self.storage_dialog)
         admin.add_checkbutton(label='暫定予測で参考計算（正式出力不可）',variable=self.allow_provisional)
         self.root.configure(menu=menu)
         self.tabs.bind('<<NotebookTabChanged>>',self.hide_admin_pages,add='+')

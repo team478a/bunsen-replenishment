@@ -107,12 +107,20 @@ def validate_database(db):
             if kind == 'jan_master_change':
                 from .jan_catalog import validate_jan
                 products=payload.get('products')
-                if not isinstance(products,list) or not products or any(not isinstance(p,dict) for p in products):raise DataError(['JAN・PLマスタの形式が不正'])
+                if not isinstance(products,list) or (not products and payload.get('source')!='reset') or any(not isinstance(p,dict) for p in products):raise DataError(['JAN・PLマスタの形式が不正'])
                 checked=[validate_jan(p) for p in products]
                 current={p['product']:p for p in checked}
                 if len(current)!=len(checked) or checked!=products:raise DataError(['JANマスタの重複・形式不整合があります'])
                 from .product_scope import validate as validate_scope
                 excluded=validate_scope(payload.get('excluded',{}),set(current))
+                if payload.get('source')=='reset':
+                    archive=payload.get('backup',{})
+                    if (current or excluded or not jan_products or payload.get('before')!=sorted(jan_products.values(),key=lambda p:p['product'])
+                        or payload.get('before_excluded')!=jan_excluded or payload.get('base_revision')!=jan_revision or payload.get('acknowledged') is not True
+                        or any(not isinstance(payload.get(k),str) or not payload[k].strip() for k in ('operator','reason'))
+                        or not isinstance(archive,dict) or not isinstance(archive.get('path'),str) or not archive['path']
+                        or not isinstance(archive.get('sha256'),str) or len(archive['sha256'])!=64 or any(c not in '0123456789abcdef' for c in archive['sha256'])):raise DataError(['JAN初期化の履歴・バックアップ記録が不整合'])
+                    jan_revision,jan_products,jan_excluded=event_id,current,excluded;events+=1;continue
                 if payload.get('source')=='scope_change':
                     targets=payload.get('targets');active=payload.get('active')
                     if (not isinstance(targets,list) or not targets or len(set(targets))!=len(targets) or set(targets)-set(jan_products) or type(active) is not bool

@@ -22,7 +22,9 @@ from .ui_theme import apply_theme, brand, section, table_scrollbars, text_panel,
 class App(SimpleUI, JanCatalogUI, CatalogUI, DeliveryUI, LegacyApp):
     diagnostic_workflow=2
     def __init__(self, root, data_home=None):
-        super().__init__(root,data_home)
+        from .storage import default_home
+        super().__init__(root,default_home() if data_home is None else data_home)
+        if self.service.read_only:self.normal_home=default_home()
         apply_theme(root)
         for parent in (self.daily,self.settings.master):
             for widget in parent.winfo_children():widget.destroy()
@@ -38,6 +40,7 @@ class App(SimpleUI, JanCatalogUI, CatalogUI, DeliveryUI, LegacyApp):
         self.build_delivery_tab()
         self.build_product_master_tab()
         brand(self)
+        responsive_label(self.root,textvariable=self.storage_info,style='Muted.TLabel').pack(fill='x',before=self.tabs,padx=12,pady=4)
         self.build_jan_tab()
         self.finish_simple_navigation()
         self.reason.trace_add('write',lambda *_:self.ack.set(False))
@@ -47,11 +50,23 @@ class App(SimpleUI, JanCatalogUI, CatalogUI, DeliveryUI, LegacyApp):
 
     def update_mode(self):
         super().update_mode()
+        self.storage_info.set('データ保存先: '+str(self.home)+('（閲覧専用）' if self.service.read_only else ''))
         self.update_settings_state()
         if hasattr(self,'mode_badge'):
             mode=('復元履歴・閲覧専用' if self.service.read_only else 'ローカル保存')
             if self.service.trial_only:mode='架空データ試用・実出荷不可  /  '+mode
             self.mode_badge.configure(text=mode)
+
+    def switch_home(self,home):
+        super().switch_home(home)
+        self.last_number=None;self.reason.set('');self.setting_reason.set('');self.allow_provisional.set(False)
+        self.invalidate_diagnostic();self.diagnostic_folder.set('')
+        self.use_registered_jan.set(False);self.use_registered_master.set(False)
+        self.refresh_jan_master(True);self.refresh_product_master(True);self.display_settings()
+
+    def storage_dialog(self):
+        from .storage_ui import StorageDialog
+        return StorageDialog(self)
 
     def _build_management(self,parent):
         from .settings_ui import build_settings_page

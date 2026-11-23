@@ -30,6 +30,23 @@ def master_csvs(products):
 
 
 class JanCatalog:
+    def reset_jan_master(self,operator,reason,acknowledged,expected_revision,backup_path):
+        from .backup import create_backup
+        from .service import encode
+        self.ensure_writable()
+        if acknowledged is not True or any(not isinstance(v,str) or not v.strip() or any(ord(c)<32 for c in v) for v in (operator,reason)):raise DataError(['初期化の担当者・理由・明示操作が必要です'])
+        state=self.jan_master()
+        if type(expected_revision) is not int or state['revision']!=expected_revision:raise DataError(['JANマスタが変更されています。初期化画面を開き直してください'])
+        if not state['all_products']:raise DataError(['JANマスタはすでに空です'])
+        archive=create_backup(self.db,self.db_path.parent,backup_path,self.clock)
+        with self.db:
+            self.db.execute('BEGIN IMMEDIATE');current=self.jan_master()
+            if current['revision']!=expected_revision:raise DataError(['バックアップ中にマスタが変更されたため初期化を止めました。再確認してください'])
+            payload=dict(source='reset',products=[],excluded={},before=current['all_products'],before_excluded=current['excluded'],base_revision=current['revision'],
+                         operator=operator.strip(),reason=reason.strip(),acknowledged=True,backup=dict(path=str(backup_path),sha256=archive['archive_sha256']))
+            self.db.execute('INSERT INTO events(at,kind,payload) VALUES(?,?,?)',(self.clock().isoformat(),'jan_master_change',encode(payload)))
+        return self.jan_master()
+
     def import_jan_csv(self,report,operator,reason,acknowledged,expected_revision,mode='merge'):
         from .jan_csv import analyse, read_csv
         from .service import encode

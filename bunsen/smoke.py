@@ -143,6 +143,9 @@ def run_smoke(output):
         checks.append('master_csv_forecast_first_pdf_time')
         checks.append('common_conditions_without_csv')
         checks.append('jan_scope_pdf_absent_and_csv_replace')
+        from .storage_demo import main as run_storage
+        run_storage(home/'storage-kit')
+        checks.append('isolated_storage_and_backed_up_master_reset')
     result = dict(version=__version__, frozen=bool(getattr(sys, 'frozen', False)),
                   executable=Path(sys.executable).name, checks=checks, success=True)
     output.parent.mkdir(parents=True, exist_ok=True)
