@@ -17,14 +17,14 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class DistributionTests(unittest.TestCase):
-    def test_portable_user_manual_has_eight_pages_and_current_workflow(self):
+    def test_portable_user_manual_has_nine_pages_and_current_workflow(self):
         import pdfplumber
         with tempfile.TemporaryDirectory() as temp:
             target=Path(temp)/'manual.pdf'
             result=subprocess.run([sys.executable,str(ROOT/'scripts/create_user_manual.py'),'--portable-fonts','--output',str(target)],capture_output=True,timeout=30)
             self.assertEqual(result.returncode,0,result.stderr.decode('utf-8',errors='replace'))
             with pdfplumber.open(target) as pdf:
-                self.assertEqual(len(pdf.pages),8)
+                self.assertEqual(len(pdf.pages),9)
                 text=''.join((page.extract_text() or '').replace('\n','').replace(' ','') for page in pdf.pages)
                 self.assertIn('CSVひな形を保存',text);self.assertIn('始業・終業の選択はありません',text)
 

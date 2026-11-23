@@ -109,6 +109,7 @@ class SimpleUI:
     def open_admin(self,page):
         for p in self.admin_pages:self.tabs.hide(p)
         self.tabs.add(page);self.tabs.select(page)
+        if page==self.management_page:self.display_settings()
 
     def hide_admin_pages(self,_event=None):
         if self.tabs.select() in (self.primary_page,str(self.history_page)):

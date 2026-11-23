@@ -47,34 +47,32 @@ class App(SimpleUI, JanCatalogUI, CatalogUI, DeliveryUI, LegacyApp):
 
     def update_mode(self):
         super().update_mode()
+        self.update_settings_state()
         if hasattr(self,'mode_badge'):
             mode=('復元履歴・閲覧専用' if self.service.read_only else 'ローカル保存')
             if self.service.trial_only:mode='架空データ試用・実出荷不可  /  '+mode
             self.mode_badge.configure(text=mode)
 
     def _build_management(self,parent):
-        ttk.Label(parent,text='補充条件の管理。数値は実業務の確認後に変更してください。変更は履歴に保存し、元CSVは上書きしません。',wraplength=1080).pack(anchor='w',pady=5)
-        row=ttk.Frame(parent);row.pack(fill='x',pady=5)
-        self.setting_key=tk.StringVar();self.setting_picker=ttk.Combobox(row,textvariable=self.setting_key,state='readonly',width=24)
-        self.setting_picker.pack(side='left',padx=4);self.setting_picker.bind('<<ComboboxSelected>>',self.select_settings)
-        self.setting_values={}
-        for key,label in [('cycle_days','サイクル日'),('lead_days','配送日'),('safety_days','安全日数'),('coverage_days','対象日数')]:
-            ttk.Label(row,text=label).pack(side='left');var=tk.StringVar();self.setting_values[key]=var;ttk.Entry(row,textvariable=var,width=5).pack(side='left',padx=3)
-        row2=ttk.Frame(parent);row2.pack(fill='x',pady=5)
-        self.setting_reason=tk.StringVar();self.setting_checked=tk.BooleanVar(value=False)
-        ttk.Label(row2,text='変更根拠').pack(side='left');ttk.Entry(row2,textvariable=self.setting_reason,width=40).pack(side='left',padx=4)
-        ttk.Label(row2,text='担当者').pack(side='left');ttk.Entry(row2,textvariable=self.operator,width=14).pack(side='left')
-        self.write_button(row2,text='設定を履歴保存・再分析へ',command=lambda:self.run(lambda:self.confirmed_action(self.setting_checked,self.apply_settings))).pack(side='left',padx=4)
-        expiry=ttk.Frame(parent);expiry.pack(fill='x',pady=5)
-        self.expiry_product=tk.StringVar();self.expiry_picker=ttk.Combobox(expiry,textvariable=self.expiry_product,state='readonly',width=15)
-        self.expiry_picker.pack(side='left');self.expiry_picker.bind('<<ComboboxSelected>>',self.select_expiry)
-        self.expiry_type=tk.StringVar();ttk.Combobox(expiry,textvariable=self.expiry_type,values=('賞味期限','消費期限'),state='readonly',width=10).pack(side='left',padx=4)
-        ttk.Label(expiry,text='製造からの期限日数').pack(side='left');self.expiry_days=tk.StringVar();ttk.Entry(expiry,textvariable=self.expiry_days,width=7).pack(side='left',padx=4)
-        self.write_button(expiry,text='期限マスタを確認保存（変更根拠・担当者必須）',command=lambda:self.run(lambda:self.confirmed_action(self.setting_checked,self.apply_expiry))).pack(side='left',padx=4)
-        self.settings=tk.Text(parent,height=7,wrap='word',state='disabled');self.settings.pack(fill='both',expand=True,pady=5)
-        ttk.Label(parent,text='履歴は保持します。旧方式の指示は閲覧・従来HTML再出力のみで、新規業務へ引き継ぎません。',wraplength=1080).pack(anchor='w')
-        self.history_list=tk.Listbox(parent,height=6);self.history_list.pack(fill='x',pady=5)
-        ttk.Button(parent,text='選択履歴の出力（旧版/復元には注意表示）',command=lambda:self.run(self.export_saved)).pack(anchor='w')
+        from .settings_ui import build_settings_page
+        build_settings_page(self,parent)
+
+    def open_settings_data(self):
+        if self.import_data(automatic_sources=True):self.open_admin(self.management_page)
+
+    def update_settings_state(self):
+        if not hasattr(self,'setting_entries'):return
+        loaded=self.data is not None
+        writable=loaded and not self.service.read_only
+        for entry in self.setting_entries:entry.configure(state='normal' if writable else 'disabled')
+        self.setting_save_button.configure(state='normal' if writable else 'disabled')
+        self.setting_picker.configure(state='readonly' if loaded else 'disabled')
+        if not loaded:
+            self.setting_targets={};self.setting_key.set('データを読み込むと倉庫・商品を選べます')
+            self.setting_picker.configure(values=())
+            for var in self.setting_values.values():var.set('')
+            self.setting_status.set('データ未取込です。「データを開いて条件を表示」からCSV一式を読み込んでください。')
+            self.expiry_frame.pack_forget()
 
     def import_data(self,automatic_sources=False):
         folder=filedialog.askdirectory(title='ムロオ新方式CSV一式を選択')
@@ -83,7 +81,7 @@ class App(SimpleUI, JanCatalogUI, CatalogUI, DeliveryUI, LegacyApp):
             path=Path(folder)
             self.use_registered_master.set(False)
             self.use_registered_jan.set((path/"requirements.csv").is_file() and not (path/"products.csv").exists() and not (path/"pallets.csv").exists())
-        self.invalidate();self.data=None
+        self.invalidate();self.data=None;self.update_settings_state()
         self.info.set('データ未取込（取込中、または不備による停止）。以前のデータでは確定できません。')
         self.settings.configure(state='normal');self.settings.delete('1.0','end');self.settings.configure(state='disabled')
         self.setting_picker.configure(values=());self.setting_key.set('');self.setting_checked.set(False)
@@ -111,34 +109,48 @@ class App(SimpleUI, JanCatalogUI, CatalogUI, DeliveryUI, LegacyApp):
         super().invalidate(keep_draft=keep_draft)
 
     def display_settings(self):
-        if not hasattr(self,'setting_picker') or self.data is None:return
+        if not hasattr(self,'setting_picker'):return
+        self.update_settings_state()
+        if self.data is None:return
         self.refresh_product_master()
         self.refresh_jan_master()
-        options=[r['warehouse']+' | '+r['product'] for r in self.data.tables['replenishment']]
+        previous=self.setting_key.get()
+        names={p['product']:p['name'] for p in self.data.tables['products']}
+        self.setting_targets={LABELS[r['warehouse']]+' / '+r['product']+' / '+names[r['product']]:(r['warehouse'],r['product']) for r in self.data.tables['replenishment']}
+        options=list(self.setting_targets)
+        if active(self.data):self.expiry_frame.pack_forget()
+        else:self.expiry_frame.pack(fill='x',pady=5)
         self.expiry_picker.configure(values=[r['product'] for r in self.data.tables['products']])
         self.expiry_product.set(self.data.tables['products'][0]['product']);self.select_expiry()
         self.setting_picker.configure(values=options)
-        if options:self.setting_key.set(options[0]);self.select_settings()
+        if options:self.setting_key.set(previous if previous in options else options[0]);self.select_settings()
         self.settings.configure(state='normal');self.settings.delete('1.0','end')
         self.settings.insert('1.0',json.dumps(self.data.tables['replenishment'],ensure_ascii=False,indent=2));self.settings.configure(state='disabled')
 
     def select_settings(self,_event=None):
         if not self.data:return
-        w,p=self.setting_key.get().split(' | ')
+        from .settings_ui import selected_target
+        w,p=selected_target(self)
         row=next(r for r in self.data.tables['replenishment'] if (r['warehouse'],r['product'])==(w,p))
         for key,var in self.setting_values.items():var.set(str(row[key]))
         self.setting_checked.set(False)
+        self.setting_status.set('選択中: '+LABELS[w]+' / '+p+' / '+next(r['name'] for r in self.data.tables['products'] if r['product']==p)+('（閲覧専用）' if self.service.read_only else '。確認済みの条件だけを変更してください。'))
 
     def apply_settings(self):
         if not self.data or not self.setting_checked.get():raise DataError(['データ取込と設定確認が必要です'])
         values={}
         for key,var in self.setting_values.items():
             value=var.get()
-            if not value.isascii() or not value.isdecimal():raise DataError(['設定は0以上の整数で入力してください'])
+            if not value.isascii() or not value.isdecimal():
+                from .settings_ui import FIELDS
+                label=next(label for field,label,_ in FIELDS if field==key)
+                raise DataError([label+': 確認済みの整数を入力してください（空欄の補完はしません）'])
             values[key]=int(value)
-        key=tuple(self.setting_key.get().split(' | '))
+        from .settings_ui import selected_target
+        key=selected_target(self)
         fresh=self.service.update_settings(self.data,key,values,self.setting_reason.get(),self.operator.get())
-        self.invalidate();self.data=fresh;self.display_settings();self.info.set('設定変更を履歴保存しました。全明細を再分析・再確認してください。')
+        self.invalidate();self.data=fresh;self.display_settings();self.setting_reason.set('');self.info.set('設定変更を履歴保存しました。全明細を再分析・再確認してください。')
+        self.setting_status.set('条件を保存しました。「補充出荷」で再計算して数量を確認してください。')
 
     def compute(self):
         if self.data is None or self.data.workflow != 2:raise DataError(['新方式データの取込が必要です'])
