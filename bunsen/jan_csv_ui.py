@@ -35,6 +35,7 @@ class JanCSVDialog(tk.Toplevel):
         if path:self.load(path)
     def load(self,path):
         self.report=None;self.save_button.configure(state='disabled');self.tree.delete(*self.tree.get_children());self.status.set('読取中…')
+        state=self.app.service.jan_master();self.revision=state['revision'];self.existing={p['product']:p for p in state['products']}
         self.report=read_csv(path);r=self.report
         for p in r['products']:
             self.tree.insert('','end',values=(p['product'],p['name'],{'best_before':'賞味期限','use_by':'消費期限'}[p['expiry_type']],p['shelf_life_days'],p['kobe_p_per_pl'],p['sugito_p_per_pl'],'更新' if p['product'] in self.existing else '新規'))

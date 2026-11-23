@@ -67,6 +67,8 @@ class WorkflowFixTests(unittest.TestCase):
         stream=io.StringIO();writer=csv.DictWriter(stream,fieldnames=FIELDS);writer.writeheader();writer.writerow(MASTER)
         report=analyse(stream.getvalue().encode());self.assertFalse(report['errors'])
         self.assertEqual(analyse(export_csv(report['products']).encode())['products'],[MASTER])
+        from bunsen.pdf_reader import printed_time
+        self.assertEqual(printed_time(dict(printed_at='2026/11/20 8:05:01')),'08:05:01')
     def test_menu_and_manual_full_width_registration_and_csv_dialog(self):
         from bunsen.jan_csv_ui import JanCSVDialog
         root=tk.Tk();root.withdraw();app=App(root,self.path/'ui')
@@ -80,7 +82,9 @@ class WorkflowFixTests(unittest.TestCase):
             app.confirmed_action(app.jan_ack,app.save_jan)
             self.assertEqual(app.service.jan_master()['products'][0]['name'],'ＬＬ惣菜ＡＢＣ１２３')
             p=self.path/'ui.csv';p.write_text(export_csv([dict(MASTER,name='ＣＳＶ全角')]),encoding='utf-8-sig')
-            dialog=JanCSVDialog(app);dialog.load(p);self.assertEqual(str(dialog.save_button['state']),'normal')
+            dialog=JanCSVDialog(app)
+            state=app.service.jan_master();app.service.save_jan_master(dict(MASTER,name='別画面更新'),'担当','確認',True,state['revision'],False)
+            dialog.load(p);self.assertEqual(dialog.revision,app.service.jan_master()['revision']);self.assertEqual(str(dialog.save_button['state']),'normal')
             dialog.reason.set('一括更新');dialog.save()
             self.assertEqual(app.service.jan_master()['products'][0]['name'],'ＣＳＶ全角');self.assertIsNone(app.data)
         finally:app.service.close();root.destroy()

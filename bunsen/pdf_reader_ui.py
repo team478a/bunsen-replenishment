@@ -7,7 +7,7 @@ import zipfile
 import re
 
 from .core import DataError, LABELS, WAREHOUSES
-from .pdf_reader import read_report, suggested_quantity
+from .pdf_reader import read_report, suggested_quantity, printed_time
 from .ui_theme import table_scrollbars, responsive_label, scroll_page
 
 POLICIES={'空欄は未確認':'unknown','バラの空欄は0（確認済み）':'loose_zero','ケース・バラの空欄は0（確認済み）':'all_zero'}
@@ -84,7 +84,7 @@ class PDFInventoryDialog(tk.Toplevel):
             if report['warehouse']!=warehouse:raise DataError([LABELS[warehouse]+'の欄ですが、PDFは'+LABELS[report['warehouse']]+'です'])
             self.reports[warehouse]=report
             self.status[warehouse].set(f"集計日 {report['stock_date']} / {report['pages']}ページ / 作成 {report['printed_at']}")
-            self.meta[warehouse]['as_of'].set(report['printed_at'].split()[-1]);self.meta[warehouse]['policy'].set('空欄は未確認')
+            self.meta[warehouse]['as_of'].set(printed_time(report));self.meta[warehouse]['policy'].set('空欄は未確認')
             self.populate(warehouse)
         except Exception:
             self.status[warehouse].set('読取できませんでした。PDFを選び直してください');raise
@@ -146,7 +146,7 @@ class PDFInventoryDialog(tk.Toplevel):
             at=r['stock_date']+'T'+text+(':00' if len(text)==5 else '')+'+09:00' if re.fullmatch(r'\d{2}:\d{2}(?::\d{2})?',text) else text
             try:stamp(at)
             except ValueError:raise DataError([LABELS[w]+': 確認済み在庫基準時刻をHH:MMで入力してください'])
-            reports[w]=dict(report=r,as_of=at,basis='closing',time_origin='pdf_footer' if text==r['printed_at'].split()[-1] else 'manual',blank_policy=POLICIES[self.meta[w]['policy'].get()])
+            reports[w]=dict(report=r,as_of=at,basis='closing',time_origin='pdf_footer' if text==printed_time(r) else 'manual',blank_policy=POLICIES[self.meta[w]['policy'].get()])
         decisions={key:dict(quantity_p=item['quantity'],reason=item['reason']) for key,item in self.items.items() if item['target']}
         folder=filedialog.askdirectory(parent=self,title='確認済み在庫CSVの新規保存先')
         if not folder:return
