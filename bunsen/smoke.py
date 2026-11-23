@@ -141,6 +141,7 @@ def run_smoke(output):
         from .workflow_demo import main as run_workflow
         run_workflow(home/'workflow-kit')
         checks.append('master_csv_forecast_first_pdf_time')
+        checks.append('common_conditions_without_csv')
     result = dict(version=__version__, frozen=bool(getattr(sys, 'frozen', False)),
                   executable=Path(sys.executable).name, checks=checks, success=True)
     output.parent.mkdir(parents=True, exist_ok=True)

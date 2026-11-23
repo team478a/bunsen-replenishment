@@ -65,6 +65,7 @@ class CatalogService:
 
     def assert_product_master_current(self, data):
         self.assert_jan_current(data)
+        self.assert_common_settings_current(data)
         revision=getattr(data,'product_master_revision',None)
         if revision is not None and (type(revision) is not int or revision!=self.product_master()['revision']):
             raise DataError(['登録商品マスタが変更されています。再取込・再計算・再確認してください'])
