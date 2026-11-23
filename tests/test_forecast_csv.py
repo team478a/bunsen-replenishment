@@ -110,16 +110,20 @@ class ForecastCSVTests(unittest.TestCase):
         payload=json.loads(self.service.db.execute("SELECT payload FROM events WHERE kind='forecast_csv_review'").fetchone()[0])
         self.assertEqual(base64.b64decode(payload['report']['source_base64']),fictional_source(DAY))
         with self.assertRaises(FileExistsError):self.save(revision=state['revision'])
-    def test_ack_and_stale_mapping_and_stale_master_block(self):
-        for kw in [dict(ack=False),dict(master=0),dict(revision=999)]:
+    def test_ack_and_stale_mapping_block(self):
+        for kw in [dict(ack=False),dict(revision=999)]:
             with self.assertRaises(DataError):self.save(**kw)
         self.assertFalse((self.path/'forecast.csv').exists())
     def test_changed_source_file_is_rejected(self):
         path=self.path/'source.csv';path.write_bytes(fictional_source(DAY));report=read_forecast(path);path.write_bytes(fictional_source(DAY,days=31))
         with self.assertRaises(DataError):self.save(report=report)
-    def test_unknown_jan_blocks(self):
+    def test_unknown_jan_is_saved_but_calculation_blocks_until_master_ready(self):
         content=fictional_source(DAY).replace(JAN.encode(),b'4900000000002')
-        with self.assertRaises(DataError):self.save(report=self.report(content))
+        self.save(report=self.report(content))
+        event=json.loads(self.service.db.execute("SELECT payload FROM events WHERE kind='forecast_csv_review'").fetchone()[0])
+        self.assertEqual(event['unregistered_jans'],['4900000000002'])
+        for name in ('forecast.csv',REVIEW_FILE):(self.csv/name).write_bytes((self.path/name).read_bytes())
+        with self.assertRaises(DataError):load(self.csv,NOW)
     def test_read_only_blocks_new_review(self):
         self.service.read_only=True
         with self.assertRaises(DataError):self.save()

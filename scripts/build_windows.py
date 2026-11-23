@@ -90,6 +90,7 @@ def build(output):
                         '--workpath', str(work / 'work'), str(ROOT / 'distribution/bunsen.spec')], cwd=ROOT, check=True)
         bundle = work / 'dist/BunsenReplenishment'
         copy_resources(bundle)
+        subprocess.run([sys.executable,str(ROOT/'scripts/create_user_manual.py'),'--output',str(bundle/'操作マニュアル.pdf')],cwd=ROOT,check=True)
         copy_licenses(bundle, packages)
         shutil.copyfile(ROOT / 'distribution/START-HERE.txt', bundle / 'START-HERE.txt')
         metadata = dict(version=__version__, revision=revision, dirty=dirty, signed=False,

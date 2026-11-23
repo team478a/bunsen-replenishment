@@ -16,6 +16,7 @@ jobs:
       - run: python -m bunsen.tools jan-demo --output dist/jan-fixed-date-demo
       - run: python -m bunsen.tools pdf-demo --output dist/pdf-fixed-date-demo
       - run: python -m bunsen.tools forecast-demo --output dist/forecast-fixed-date-demo
+      - run: python -m bunsen.tools workflow-demo --output dist/workflow-fixed-date-demo
   package:
     name: Windows package
     needs: test

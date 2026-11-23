@@ -30,6 +30,27 @@ def master_csvs(products):
 
 
 class JanCatalog:
+    def import_jan_csv(self,report,operator,reason,acknowledged,expected_revision):
+        from .jan_csv import analyse, read_csv
+        from .service import encode
+        import base64
+        self.ensure_writable()
+        fresh=analyse(base64.b64decode(report['source_base64'],validate=True))
+        if any(report.get(k)!=v for k,v in fresh.items()):raise DataError(['CSV候補が変更されています。再読取してください'])
+        if fresh['errors']:raise DataError(fresh['errors'])
+        if report.get('path') and read_csv(report['path'])['source_sha256']!=fresh['source_sha256']:raise DataError(['元CSVが変更されています。再読取してください'])
+        if not isinstance(operator,str) or not operator.strip() or not isinstance(reason,str) or not reason.strip() or acknowledged is not True:raise DataError(['担当者・登録変更根拠・確認保存が必要です'])
+        with self.db:
+            self.db.execute('BEGIN IMMEDIATE');state=self.jan_master()
+            if type(expected_revision) is not int or state['revision']!=expected_revision:raise DataError(['JANマスタが更新されています。CSVを再読取してください'])
+            products={p['product']:p for p in state['products']};changes=[]
+            for p in fresh['products']:
+                changes.append(dict(before=products.get(p['product']),after=p));products[p['product']]=p
+            payload=dict(products=sorted(products.values(),key=lambda p:p['product']),before=state['products'],after=fresh['products'],changes=changes,
+                         base_revision=state['revision'],operator=operator.strip(),reason=reason.strip(),acknowledged=True,source='csv_import',csv_report=report)
+            cur=self.db.execute('INSERT INTO events(at,kind,payload) VALUES(?,?,?)',(self.clock().isoformat(),'jan_master_change',encode(payload)))
+        return dict(revision=cur.lastrowid,products=payload['products'])
+
     def save_pdf_inventory(self,reports,decisions,operator,acknowledged,expected_revision,folder):
         from .pdf_reader import write_reviewed
         from .service import encode

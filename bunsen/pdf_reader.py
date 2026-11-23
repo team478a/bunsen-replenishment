@@ -155,6 +155,9 @@ def write_reviewed(reports, decisions, products, operator, folder):
         from .core import JST
         if instant.astimezone(JST).date().isoformat()!=report['stock_date']:raise DataError(['在庫基準日時とPDFの集計日が一致しません'])
         if basis not in ('opening','closing'):raise DataError(['在庫の始業・終業を指定してください'])
+        if 'time_origin' in entry:
+            if basis!='closing' or entry['time_origin'] not in ('pdf_footer','manual'):raise DataError(['新規PDFフローは集計日反映済み・翌日から需要計算です'])
+            if entry['time_origin']=='pdf_footer' and instant.astimezone(JST).strftime('%H:%M:%S')!=canonical['printed_at'].split()[-1]:raise DataError(['PDF左下時刻と採用時刻が不一致です。手修正として確認してください'])
         name=warehouse+'-report.pdf';source={r['product']:r for r in canonical['rows']}
         evidence.append(dict(source_pdf=name,sha256=canonical['sha256'],content_base64=canonical['content_base64']))
         for product in sorted(known):

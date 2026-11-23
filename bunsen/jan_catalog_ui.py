@@ -14,8 +14,10 @@ class JanCatalogUI:
         self.jan_tab=scroll_page(page);self.jan_edit=None;self.jan_revision=0;self.jan_db=None
         ttk.Label(self.jan_tab,text='JAN・倉庫別の物理PLマスタ',font=('Yu Gothic UI',18,'bold')).pack(anchor='w')
         responsive_label(self.jan_tab,text=NOTICE+' 1PLあたりPは、確認済みの物理パレット1枚の数量を入力します。').pack(fill='x',pady=6)
+        responsive_label(self.jan_tab,text='品名は全角英数・日本語を使用できます。JAN・期限日数・PLのP数は半角数字で入力してください。CSVは「CSV取込・ひな形」から登録できます。').pack(fill='x',pady=3)
         bar=ttk.Frame(self.jan_tab);bar.pack(fill='x')
         ttk.Button(bar,text='新規JAN',command=self.new_jan).pack(side='left',padx=4)
+        self.write_button(bar,text='CSV取込・ひな形',command=self.jan_csv_dialog).pack(side='left',padx=4)
         ttk.Button(bar,text='最新一覧',command=lambda:self.refresh_jan_master(True)).pack(side='left',padx=4)
         ttk.Button(bar,text='商品・PLマスタCSVを新規出力',command=lambda:self.run(self.export_jan)).pack(side='left',padx=4)
         listing=ttk.Frame(self.jan_tab);listing.pack(fill='x',pady=6)
@@ -56,6 +58,10 @@ class JanCatalogUI:
         self.invalidate();self.invalidate_diagnostic();self.data=None
         self.info.set('JAN・PLマスタの使用元を変更しました。再取込・再計算してください。')
 
+    def jan_csv_dialog(self):
+        from .jan_csv_ui import JanCSVDialog
+        return JanCSVDialog(self)
+
     def refresh_jan_master(self,force=False):
         if not hasattr(self,'jan_tree'):return
         state=self.service.jan_master()
@@ -82,7 +88,7 @@ class JanCatalogUI:
     def save_jan(self):
         values={key:var.get() for key,var in self.jan_values.items()}
         for key in FIELDS[3:]:
-            if not values[key].isascii() or not values[key].isdecimal():raise DataError([key+': 正整数を確認入力してください'])
+            if not values[key].isascii() or not values[key].isdecimal():raise DataError([{'shelf_life_days':'製造からの期限日数','kobe_p_per_pl':'神戸1PLのP数','sugito_p_per_pl':'杉戸1PLのP数'}[key]+': 半角の正整数を確認入力してください（品名は全角英数可）'])
             values[key]=int(values[key])
         values['expiry_type']={'賞味期限':'best_before','消費期限':'use_by'}.get(values['expiry_type'])
         self.service.save_jan_master(values,self.jan_operator.get(),self.jan_reason.get(),self.jan_ack.get(),self.jan_revision,self.jan_edit is None)
