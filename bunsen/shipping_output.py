@@ -15,6 +15,7 @@ HEADERS = ['商品','品名','現在庫P','対象予測P','安全P(最大)','必
 
 def notice(payload):
     parts = ['必要補充数量の指示です。実出荷実績・ブンセンの供給可能在庫を示しません。']
+    if payload.get('product_scope'):parts.append(f"明示的な補充対象外JAN {len(payload['product_scope']['excluded'])}件（在庫0の意味ではありません）")
     if payload.get('profile')==PROFILE:parts.append(NOTICE)
     if payload.get('forecast_source'):
         source=payload['forecast_source']

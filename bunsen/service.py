@@ -245,6 +245,7 @@ class Service(CommonSettings, ForecastService, JanCatalog, CatalogService):
                 raise DataError(['過去日を含む配送予定は確定できません。新たに計算してください'])
             fresh=self.snapshot_data(saved['raw'],report['digest'])
             self.assert_common_settings_current(fresh)
+            self.assert_jan_current(fresh)
             verified=build_plan(fresh,date.fromisoformat(report['start']),stamp(report['calculated_at']),allow_provisional=report['allow_provisional'])
             for key,value in verified.items():
                 if report.get(key)!=value:raise DataError(['保存計画と原本再計算が一致しません'])
@@ -329,6 +330,8 @@ class Service(CommonSettings, ForecastService, JanCatalog, CatalogService):
                    'validation': errors, 'dispatch': dispatch.isoformat(), 'at': at}
         if fresh.workflow == 2:
             payload.update(workflow=2,meaning='replenishment_instruction_not_shipment_actual',settings=fresh.tables['replenishment'])
+            from .product_scope import FILE,parse
+            if FILE in fresh.raw:payload['product_scope']=parse(fresh.raw[FILE])
             if active(fresh):payload.update(profile=PROFILE,inbound_scope='excluded',notice=NOTICE)
             from .forecast_csv import metadata
             if metadata(fresh.raw) is not None:payload['forecast_source']=metadata(fresh.raw)

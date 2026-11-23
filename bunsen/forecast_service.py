@@ -25,7 +25,7 @@ class ForecastService:
                 self.db.execute('BEGIN IMMEDIATE');master=self.jan_master();previous=self.forecast_mapping()
                 if type(mapping_revision) is not int or previous['revision']!=mapping_revision:raise DataError(['倉庫コード対応が更新されました。予測確認画面を開き直してください'])
                 known={p['product'] for p in master['products']}
-                missing=sorted({r['product'] for r in report['rows']}-known)
+                missing=sorted({r['product'] for r in report['rows']}-known-set(master['excluded']))
                 for name,text in outputs.items():
                     path=Path(folder)/name
                     with path.open('x',encoding='utf-8-sig',newline='') as stream:created.append(path);stream.write(text)

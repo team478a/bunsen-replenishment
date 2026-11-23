@@ -17,14 +17,14 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class DistributionTests(unittest.TestCase):
-    def test_portable_user_manual_has_nine_pages_and_current_workflow(self):
+    def test_portable_user_manual_has_ten_pages_and_current_workflow(self):
         import pdfplumber
         with tempfile.TemporaryDirectory() as temp:
             target=Path(temp)/'manual.pdf'
             result=subprocess.run([sys.executable,str(ROOT/'scripts/create_user_manual.py'),'--portable-fonts','--output',str(target)],capture_output=True,timeout=30)
             self.assertEqual(result.returncode,0,result.stderr.decode('utf-8',errors='replace'))
             with pdfplumber.open(target) as pdf:
-                self.assertEqual(len(pdf.pages),9)
+                self.assertEqual(len(pdf.pages),10)
                 text=''.join((page.extract_text() or '').replace('\n','').replace(' ','') for page in pdf.pages)
                 self.assertIn('CSVひな形を保存',text);self.assertIn('始業・終業の選択はありません',text)
 
@@ -52,6 +52,7 @@ class DistributionTests(unittest.TestCase):
             self.assertIn('base_forecast_decimal_import', payload['checks'])
             self.assertIn('master_csv_forecast_first_pdf_time', payload['checks'])
             self.assertIn('common_conditions_without_csv', payload['checks'])
+            self.assertIn('jan_scope_pdf_absent_and_csv_replace', payload['checks'])
             self.assertFalse((root / 'normal').exists())
 
     def test_build_resources_copy_only_allowlisted_tracked_files(self):

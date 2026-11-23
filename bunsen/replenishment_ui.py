@@ -149,6 +149,9 @@ class App(SimpleUI, JanCatalogUI, CatalogUI, DeliveryUI, LegacyApp):
         warnings=sum(bool(r['warning']) or r['quantity_p']<number(r['required_p']) for r in self.lines)
         self.result_status.set(f'{state}  /  {len(self.lines)}明細  /  検証不備 {len(errors)}件  /  注意明細 {warnings}件')
         evidence=[]
+        from .product_scope import FILE,parse
+        if FILE in self.data.raw:
+            scope=parse(self.data.raw[FILE]);evidence.append('補充対象外の明示設定（在庫0ではありません）: '+', '.join(p+' / '+d['reason'] for p,d in scope['excluded'].items()))
         from .forecast_csv import metadata
         forecast_source=metadata(self.data.raw)
         if forecast_source:evidence.append('予測採用列: '+forecast_source['quantity_column']+' / 大口・特売・製造・入庫の別加算なし / 確認者 '+forecast_source['operator']+' / 倉庫対応 '+str(forecast_source['mapping']))

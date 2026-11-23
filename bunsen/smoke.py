@@ -142,6 +142,7 @@ def run_smoke(output):
         run_workflow(home/'workflow-kit')
         checks.append('master_csv_forecast_first_pdf_time')
         checks.append('common_conditions_without_csv')
+        checks.append('jan_scope_pdf_absent_and_csv_replace')
     result = dict(version=__version__, frozen=bool(getattr(sys, 'frozen', False)),
                   executable=Path(sys.executable).name, checks=checks, success=True)
     output.parent.mkdir(parents=True, exist_ok=True)

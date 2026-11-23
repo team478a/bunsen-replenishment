@@ -13,6 +13,7 @@ HEADERS = ['便','出荷日','入荷日','商品','品名','数量P','PL枠','�
 
 def plan_notice(report):
     parts = [report['notice'], '正式配送予定' if report['formal'] else '参考・未確定配送計画（正式使用不可）']
+    if report.get('product_scope'):parts.append(f"補充対象外JAN {len(report['product_scope']['excluded'])}件（在庫0ではありません）")
     if report.get('profile')==PROFILE:parts.append(NOTICE)
     if report.get('forecast_source'):
         source=report['forecast_source'];parts.append('需要予測列: '+source['quantity_column']+' / 大口・注文・製造・入庫の別加算なし / 倉庫対応 '+', '.join(code+'→'+LABELS[w] for code,w in source['mapping'].items()))

@@ -17,7 +17,7 @@ class PDFInventoryDialog(tk.Toplevel):
     def __init__(self,app):
         super().__init__(app.root)
         self.app=app;self.service=app.service;state=self.service.jan_master()
-        self.products=state['products'];self.revision=state['revision'];self.reports={};self.items={};self.selection=None
+        self.products=state['products'];self.excluded=state['excluded'];self.revision=state['revision'];self.reports={};self.items={};self.selection=None
         self.title('在庫PDFの読み取り・確認');self.geometry('1100x760');self.minsize(950,650);self.transient(app.root)
         page=ttk.Frame(self,padding=14);page.pack(fill='both',expand=True)
         body=scroll_page(page)
@@ -46,6 +46,8 @@ class PDFInventoryDialog(tk.Toplevel):
         ttk.Label(editor,text='選択商品の数量 P').pack(side='left');ttk.Entry(editor,textvariable=self.quantity,width=12).pack(side='left',padx=5)
         ttk.Label(editor,text='変更・確認根拠').pack(side='left');ttk.Entry(editor,textvariable=self.reason,width=36).pack(side='left',padx=5)
         ttk.Button(editor,text='反映',command=lambda:self.app.run(self.apply_edit)).pack(side='left',padx=4)
+        ttk.Button(body,text='選択JANを補充対象外にする（マスタ更新）',command=lambda:self.app.run(self.exclude_selected)).pack(anchor='w',pady=5)
+        responsive_label(body,text='PDFに商品が未掲載の場合は「空欄を0」の対象ではありません。不要な商品は、担当者と理由を入力して対象外にします（神戸・杉戸の両方と今後の補充対象から外れます）。').pack(fill='x',pady=4)
         self.note=tk.StringVar(value='原本の作成日時と在庫基準日時は区別してください。集計日と一致する確認済み基準日時を指定します。')
         responsive_label(body,textvariable=self.note).pack(fill='x',pady=4)
         actions=ttk.Frame(body);actions.pack(fill='x',pady=6)
@@ -101,15 +103,28 @@ class PDFInventoryDialog(tk.Toplevel):
         self.reason.set('') if hasattr(self,'reason') else None
         self.tree.delete(*self.tree.get_children());self.keys=list(self.items)
         for index,key in enumerate(self.keys):
-            item=self.items[key];row=item['source'];state=('対象外・マスタ未登録' if not item['target'] else 'PDFに商品なし・要確認' if not row else '要確認: '+' / '.join(row['issues']) if row['issues'] else '要確認・数量空欄' if item['quantity'] is None else '手修正' if item['edited'] else '読取済み・未確定')
-            self.tree.insert('','end',iid=str(index),values=(LABELS[key[0]],key[1],item['name'],row['cases'] if row and row['cases'] is not None else '空欄',row['loose'] if row and row['loose'] is not None else '空欄',row['p_per_case'] if row else '',item['quantity'] if item['quantity'] is not None else '',state))
+            item=self.items[key];row=item['source'];state=('対象外（マスタ設定）' if key[1] in self.excluded else '対象外・マスタ未登録' if not item['target'] else 'PDF未掲載（空欄ではありません）' if not row else '要確認: '+' / '.join(row['issues']) if row['issues'] else '要確認・数量空欄' if item['quantity'] is None else '手修正' if item['edited'] else '読取済み・未確定')
+            self.tree.insert('','end',iid=str(index),values=(LABELS[key[0]],key[1],item['name'],row['cases'] if row and row['cases'] is not None else '空欄' if row else '未掲載',row['loose'] if row and row['loose'] is not None else '空欄' if row else '未掲載',row['p_per_case'] if row else '',item['quantity'] if item['quantity'] is not None else '未確認',state))
 
     def selected(self,_=None):
         if not self.tree.selection():return
         self.selection=self.keys[int(self.tree.selection()[0])];item=self.items[self.selection]
         self.quantity.set('' if item['quantity'] is None else str(item['quantity']));self.reason.set(item['reason'])
         row=item['source']
-        self.note.set('原本ページ: '+','.join(map(str,row['pages'])) if row else 'PDFに商品がありません。数量を推定せず、原本確認の根拠を記録してください。')
+        self.note.set('原本ページ: '+','.join(map(str,row['pages'])) if row else 'PDFに商品が未掲載です。「空欄を0」では補完しません。不要なら理由を入力して補充対象外にするか、対象商品なら原本を確認して数量と根拠を入力してください。')
+
+    def exclude_selected(self):
+        if self.selection is None:raise DataError(['対象外にする商品を一覧から選んでください'])
+        product=self.selection[1];item=self.items[self.selection]
+        if not item['target']:raise DataError(['この商品はすでに対象外、またはマスタ未登録です'])
+        current='' if item['quantity'] is None else str(item['quantity'])
+        if self.quantity.get()!=current:raise DataError(['入力中の数量は「反映」するか元に戻してから対象外にしてください'])
+        state=self.service.set_jan_active([product],False,self.app.operator.get(),self.reason.get(),True,self.revision)
+        self.products=state['products'];self.excluded=state['excluded'];self.revision=state['revision']
+        for key,entry in self.items.items():
+            if key[1]==product:entry['target']=False
+        self.app.invalidate();self.app.data=None;self.app.refresh_jan_master(True);self.refresh()
+        self.note.set('JAN '+product+' を両倉庫の補充対象から外しました。在庫を0にしたわけではありません。元に戻す操作はJANマスタ画面で行えます。')
 
     def pending(self):
         if self.selection:
@@ -137,8 +152,10 @@ class PDFInventoryDialog(tk.Toplevel):
 
     def save(self):
         self.pending();self.service.ensure_writable()
+        if not self.products:raise DataError(['補充対象の商品がありません。JANマスタで対象商品を登録・対象に戻してください'])
         if set(self.reports)!=set(WAREHOUSES):raise DataError(['神戸・杉戸の両PDFを読み取ってください'])
-        if any(item['target'] and item['quantity'] is None for item in self.items.values()):raise DataError(['数量が未確認の商品があります。0補完せず原本を確認してください'])
+        missing=[LABELS[w]+' / '+p+' / '+self.items[(w,p)]['name']+' / 集計日 '+self.reports[w]['stock_date'] for w,p in self.items if self.items[(w,p)]['target'] and self.items[(w,p)]['quantity'] is None]
+        if missing:raise DataError(['確認数量が未確認です。PDF未掲載の商品は「空欄を0」では補完しません。不要なJANは理由を入力して補充対象外にしてください。対象商品は原本確認が必要です。']+missing)
         reports={}
         from .core import stamp
         for w,r in self.reports.items():

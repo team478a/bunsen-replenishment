@@ -107,6 +107,8 @@ def build_plan(data, start, calculated_at, *, allow_provisional=False):
         report['warnings'].insert(0,REQUIREMENTS_NOTICE)
     from .forecast_csv import metadata
     if metadata(data.raw) is not None:report['forecast_source']=metadata(data.raw)
+    from .product_scope import FILE,parse
+    if FILE in data.raw:report['product_scope']=parse(data.raw[FILE])
     return canonical(report)
 
 

@@ -10,13 +10,18 @@ class JanCSVDialog(tk.Toplevel):
     def __init__(self,app):
         super().__init__(app.root);self.app=app;self.report=None
         self.title('JAN・倉庫別PLマスタ CSV取込');self.geometry('1050x700');self.transient(app.root)
-        state=app.service.jan_master();self.revision=state['revision'];self.existing={p['product']:p for p in state['products']}
+        state=app.service.jan_master();self.revision=state['revision'];self.existing={p['product']:p for p in state['all_products']};self.active_ids={p['product'] for p in state['products']}
         body=scroll_page(ttk.Frame(self));body.master.master.pack(fill='both',expand=True)
-        responsive_label(body,text='全角英数の品名をそのまま登録できます。CSVの全行を確認して保存します。同じJANは更新し、CSVにない既存商品は残します。不備が1行でもあれば登録しません。').pack(fill='x',padx=12,pady=12)
+        responsive_label(body,text='全角英数の品名をそのまま登録できます。CSVの全行を確認して保存します。同じJANは上書き更新します。追加・更新モードは既存対象を保持し、置換モードはCSVにない商品を補充対象外にします。不備が1行でもあれば登録しません。').pack(fill='x',padx=12,pady=12)
         bar=ttk.Frame(body);bar.pack(fill='x',padx=12)
         ttk.Button(bar,text='CSVを選択',command=lambda:app.run(self.choose)).pack(side='left',padx=4)
         ttk.Button(bar,text='CSVひな形を保存',command=lambda:app.run(lambda:self.export(False))).pack(side='left',padx=4)
         ttk.Button(bar,text='登録済みを同じCSV形式で出力',command=lambda:app.run(lambda:self.export(True))).pack(side='left',padx=4)
+        mode_row=ttk.Frame(body);mode_row.pack(fill='x',padx=12,pady=8)
+        self.mode=tk.StringVar(value='merge')
+        ttk.Radiobutton(mode_row,text='追加・更新（既存の対象を保持）',variable=self.mode,value='merge').pack(side='left',padx=4)
+        ttk.Radiobutton(mode_row,text='CSVの一覧で置換（CSVにないJANは対象外）',variable=self.mode,value='replace').pack(side='left',padx=4)
+        self.mode.trace_add('write',lambda *_:self.render_preview() if self.report is not None else None)
         self.status=tk.StringVar(value='未取込。UTF-8 / CP932、ひな形の6列を使用してください。')
         responsive_label(body,textvariable=self.status).pack(fill='x',padx=12,pady=8)
         listing=ttk.Frame(body);listing.pack(fill='x',padx=12)
@@ -35,13 +40,19 @@ class JanCSVDialog(tk.Toplevel):
         if path:self.load(path)
     def load(self,path):
         self.report=None;self.save_button.configure(state='disabled');self.tree.delete(*self.tree.get_children());self.status.set('読取中…')
-        state=self.app.service.jan_master();self.revision=state['revision'];self.existing={p['product']:p for p in state['products']}
-        self.report=read_csv(path);r=self.report
+        state=self.app.service.jan_master();self.revision=state['revision'];self.existing={p['product']:p for p in state['all_products']};self.active_ids={p['product'] for p in state['products']}
+        self.report=read_csv(path);self.render_preview()
+
+    def render_preview(self):
+        r=self.report;self.tree.delete(*self.tree.get_children())
+        self.save_button.configure(state='disabled')
         for p in r['products']:
             self.tree.insert('','end',values=(p['product'],p['name'],{'best_before':'賞味期限','use_by':'消費期限'}[p['expiry_type']],p['shelf_life_days'],p['kobe_p_per_pl'],p['sugito_p_per_pl'],'更新' if p['product'] in self.existing else '新規'))
         new=sum(p['product'] not in self.existing for p in r['products'])
-        self.status.set(f"{r['encoding']} / 新規{new}件 / 更新{len(r['products'])-new}件 / 不備{len(r['errors'])}件")
-        self.errors.configure(state='normal');self.errors.delete('1.0','end');self.errors.insert('1.0','\n'.join(r['errors']) or '不備なし。数量・期限・既存JANの更新内容を確認して保存してください。');self.errors.configure(state='disabled')
+        omitted=sorted(self.active_ids-{p['product'] for p in r['products']}) if self.mode.get()=='replace' else []
+        self.status.set(f"{r['encoding']} / 新規{new}件 / 更新{len(r['products'])-new}件 / 対象外へ変更{len(omitted)}件 / 不備{len(r['errors'])}件")
+        self.errors.configure(state='normal');self.errors.delete('1.0','end');self.errors.insert('1.0','\n'.join(r['errors']) if r['errors'] else '不備なし。CSVに含まれるJANは補充対象になります。登録情報・旧履歴は保持します。'+('\n補充対象外へ変更するJAN:\n'+'\n'.join(p+' '+self.existing[p]['name'] for p in omitted) if omitted else ''));self.errors.configure(state='disabled')
+        self.save_button.configure(text='CSVの一覧で補充対象を置換' if self.mode.get()=='replace' else '内容を確認して追加・更新')
         if not r['errors'] and not self.app.service.read_only:self.save_button.configure(state='normal')
     def export(self,existing):
         products=self.app.service.jan_master()['products'] if existing else []
@@ -50,7 +61,7 @@ class JanCSVDialog(tk.Toplevel):
             with Path(path).open('x',encoding='utf-8-sig',newline='') as f:f.write(export_csv(products))
     def save(self):
         if self.report is None:raise DataError(['CSVを選んでください'])
-        self.app.service.import_jan_csv(self.report,self.app.operator.get(),self.reason.get(),True,self.revision)
+        self.app.service.import_jan_csv(self.report,self.app.operator.get(),self.reason.get(),True,self.revision,mode=self.mode.get())
         self.app.invalidate();self.app.invalidate_diagnostic();self.app.data=None;self.app.refresh_jan_master(True)
         self.app.info.set('JANマスタCSVを一括登録しました。在庫・予測・補充条件を再取込・再計算してください。')
         self.destroy()
