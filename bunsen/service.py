@@ -76,9 +76,11 @@ class Service(CommonSettings, ForecastService, JanCatalog, CatalogService):
             self.db.execute('INSERT INTO events(at,kind,payload) VALUES(?,?,?)',
                             (self.clock().isoformat(), kind, encode(payload)))
 
-    def import_folder(self, folder, *, workflow=None, use_registered_products=False, use_registered_jan=False,use_common_settings=False):
+    def import_folder(self, folder, *, workflow=None, use_registered_products=False, use_registered_jan=False,use_common_settings=False,require_warehouse_settings=False):
         self.ensure_writable()
         if use_common_settings:
+            from .common_settings import warehouse_specific
+            if require_warehouse_settings and not warehouse_specific(self.common_settings()['values']):raise DataError(['先に「補充条件」で神戸・杉戸の倉庫別条件を確認・保存してください。旧共通条件は自動適用しません'])
             if workflow!=2 or use_registered_products:raise DataError(['共通条件はJAN・物理PL方式で使用してください'])
             try:data=self.import_common_folder(folder,use_registered_jan)
             except (DataError,OSError,ValueError,KeyError,csv.Error) as exc:

@@ -146,6 +146,9 @@ def run_smoke(output):
         from .storage_demo import main as run_storage
         run_storage(home/'storage-kit')
         checks.append('isolated_storage_and_backed_up_master_reset')
+        from .warehouse_demo import main as run_warehouse
+        run_warehouse(home/'warehouse-kit')
+        checks.append('warehouse_specific_conditions_arrival_and_reports')
     result = dict(version=__version__, frozen=bool(getattr(sys, 'frozen', False)),
                   executable=Path(sys.executable).name, checks=checks, success=True)
     output.parent.mkdir(parents=True, exist_ok=True)
