@@ -74,12 +74,12 @@ class ForecastDialog(tk.Toplevel):
         if self.report['errors']:raise DataError(self.report['errors'])
         validate_mapping(self.report,self.mapping())
         if not self.app.operator.get().strip():raise DataError(['担当者を入力してください'])
-        folder=filedialog.askdirectory(parent=self,title='在庫CSV・補充条件と合わせる保存先（既存ファイルは上書きしません）')
+        folder=filedialog.askdirectory(parent=self,title='在庫CSVとまとめる保存先（既存ファイルは上書きしません）')
         if not folder:return
         self.service.save_forecast_csv(self.report,self.mapping(),self.app.operator.get(),True,self.master_revision,self.mapping_revision,folder)
         self.app.invalidate();self.app.data=None
         missing=sorted({r['product'] for r in self.report['rows']}-{p['product'] for p in self.service.jan_master()['products']})
         warning=' 未登録JAN: '+', '.join(missing)+'。「管理・その他」→「JAN・倉庫別PLマスタ」で登録してください。' if missing else ''
         self.app.info.set('予測CSVと原本・倉庫対応の確認証跡を保存しました。'+warning)
-        self.app.result_status.set('予測CSVの取込完了。'+warning if warning else '予測CSVの準備が完了しました。在庫・補充条件と合わせてデータを開いてください。')
+        self.app.result_status.set('予測CSVの取込完了。'+warning if warning else '予測CSVの準備が完了しました。在庫CSVを合わせ、画面で共通条件を保存してデータを開いてください。')
         self.destroy()
