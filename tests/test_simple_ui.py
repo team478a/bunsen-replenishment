@@ -16,7 +16,7 @@ class SimpleUITests(unittest.TestCase):
         self.root=tk.Tk();self.root.withdraw();self.app=App(self.root,self.path/'kit/home')
         self.app.service.clock=lambda:datetime.combine(DAY,time(9),JST)
         self.app.day.set(str(DAY))
-        self.app.service.save_common_settings(dict(cycle_days=1,lead_days=0,safety_days=1,coverage_days=2),'架空担当','架空共通条件',True,0)
+        self.app.service.save_common_settings({w:dict(cycle_days=1,lead_days=0,safety_days=1,coverage_days=2) for w in ('KOBE','SUGITO')},'架空担当','架空共通条件',True,0)
     def tearDown(self):
         self.app.service.close();self.root.destroy();self.temp.cleanup()
     def load(self):

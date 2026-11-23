@@ -55,6 +55,7 @@ class DistributionTests(unittest.TestCase):
             self.assertIn('common_conditions_without_csv', payload['checks'])
             self.assertIn('jan_scope_pdf_absent_and_csv_replace', payload['checks'])
             self.assertIn('isolated_storage_and_backed_up_master_reset', payload['checks'])
+            self.assertIn('warehouse_specific_conditions_arrival_and_reports', payload['checks'])
             self.assertFalse((root / 'normal').exists())
 
     def test_build_resources_copy_only_allowlisted_tracked_files(self):

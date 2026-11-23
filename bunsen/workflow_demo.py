@@ -34,8 +34,9 @@ def main(output):
         assert stock.items[('KOBE',extra)]['quantity'] is None
         stock.tree.selection_set(str(stock.keys.index(('KOBE',extra))));stock.selected();stock.reason.set('架空の補充対象外確認');stock.exclude_selected()
         with patch('bunsen.pdf_reader_ui.filedialog.askdirectory',return_value=str(target)):stock.save()
-        for key,value in dict(cycle_days=1,lead_days=0,safety_days=1,coverage_days=2).items():app.setting_values[key].set(str(value))
-        app.setting_reason.set('架空の全商品共通条件');app.confirmed_action(app.setting_checked,app.apply_settings)
+        for w in ('KOBE','SUGITO'):
+            for key,value in dict(cycle_days=1,lead_days=0,safety_days=1,coverage_days=2).items():app.setting_values[(w,key)].set(str(value))
+        app.setting_reason.set('架空の倉庫別・商品共通条件');app.confirmed_action(app.setting_checked,app.apply_settings)
         assert not (target/'requirements.csv').exists()
         app.data=app.service.import_folder(target,workflow=2,use_common_settings=True);app.day.set('2026-11-09');app.compute()
         assert 'common-settings.csv' in app.data.raw

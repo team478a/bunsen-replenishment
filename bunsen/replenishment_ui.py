@@ -46,7 +46,7 @@ class App(SimpleUI, JanCatalogUI, CatalogUI, DeliveryUI, LegacyApp):
         self.reason.trace_add('write',lambda *_:self.ack.set(False))
         self.allow_provisional.trace_add('write',lambda *_:self.invalidate())
         self.history();self.update_mode();self.display_settings()
-        self.info.set('先に「補充条件」で全商品共通の条件を保存し、在庫・予測データを取り込んでください。入庫・輸送中は対象外。旧v2は従来計算として保持します。')
+        self.info.set('先に「補充条件」で神戸・杉戸の倉庫別条件を保存し、在庫・予測データを取り込んでください。入庫・輸送中は対象外。旧v2は従来計算として保持します。')
 
     def update_mode(self):
         super().update_mode()
@@ -92,7 +92,7 @@ class App(SimpleUI, JanCatalogUI, CatalogUI, DeliveryUI, LegacyApp):
         self.master_source_picker.configure(values=());self.master_source.set('')
         common=automatic_sources and ((Path(folder)/'requirements.csv').exists() or not (Path(folder)/'replenishment.csv').exists())
         data=self.service.import_folder(folder,workflow=2,use_registered_jan=self.use_registered_jan.get(),
-            use_registered_products=self.use_registered_master.get(),use_common_settings=common)
+            use_registered_products=self.use_registered_master.get(),use_common_settings=common,require_warehouse_settings=common)
         if data.workflow != 2:raise DataError(['旧形式CSVは履歴用です。在庫・予測・商品PLマスタを含む一式を指定してください'])
         self.data=data;self.folder=folder
         source=(f'登録JAN・PLマスタ版{data.jan_master_revision}' if data.jan_master_revision is not None else
@@ -114,22 +114,31 @@ class App(SimpleUI, JanCatalogUI, CatalogUI, DeliveryUI, LegacyApp):
         if not hasattr(self,'setting_entries'):return
         self.update_settings_state()
         state=self.service.common_settings();self.setting_revision=state['revision']
-        for key,var in self.setting_values.items():var.set('' if state['values'] is None else str(state['values'][key]))
+        from .common_settings import warehouse_specific
+        from .settings_ui import FIELDS
+        specific=warehouse_specific(state['values'])
+        for (warehouse,key),var in self.setting_values.items():var.set(str(state['values'][warehouse][key]) if specific else '')
+        mapping=self.service.forecast_mapping()['mapping']
+        for w,var in self.setting_warehouses.items():
+            codes=sorted(k for k,v in mapping.items() if v==w)
+            var.set(LABELS[w]+'\n倉庫番号: '+w+'\n予測CSVの倉庫番号: '+('・'.join(codes) if codes else '未登録'))
         self.setting_checked.set(False)
-        self.setting_status.set('共通条件が未設定です。業務で確認した4項目を入力して保存してください。' if state['values'] is None else
-            f"全商品共通の条件を保存済み（版{state['revision']} / 確認者 {state['operator']}）。CSV取込は不要です。")
+        self.setting_status.set(f"倉庫別の条件を保存済み（版{state['revision']} / 確認者 {state['operator']}）。商品別設定・条件CSVは不要です。" if specific else
+            '神戸・杉戸の条件をそれぞれ入力して保存してください。'+(' 旧共通条件は履歴に保持: '+' / '.join(label+' '+str(state['values'][key]) for key,label,_ in FIELDS)+'。倉庫別に再確認するまで新規計算へ適用しません。' if state['values'] is not None else ''))
 
     def apply_settings(self):
         if not self.setting_checked.get():raise DataError(['条件の確認保存が必要です'])
         from .settings_ui import FIELDS
-        values={}
-        for key,label,_ in FIELDS:
-            value=self.setting_values[key].get()
-            if not value.isascii() or not value.isdecimal():raise DataError([label+': 確認済みの整数を入力してください（空欄の補完不可）'])
-            values[key]=int(value)
+        from .core import WAREHOUSES
+        values={w:{} for w in WAREHOUSES}
+        for w in WAREHOUSES:
+            for key,label,_ in FIELDS:
+                value=self.setting_values[(w,key)].get()
+                if not value.isascii() or not value.isdecimal():raise DataError([LABELS[w]+' / '+label+': 確認済みの整数を入力してください（空欄の補完不可）'])
+                values[w][key]=int(value)
         self.service.save_common_settings(values,self.operator.get(),self.setting_reason.get(),True,self.setting_revision)
         self.invalidate();self.data=None;self.display_settings();self.setting_reason.set('')
-        self.setting_status.set('全商品共通の条件を保存しました。「補充出荷」でデータを取り込んで計算してください。')
+        self.setting_status.set('神戸・杉戸の倉庫別条件を保存しました。「補充出荷」でデータを取り込んで計算してください。')
         self.info.set(self.setting_status.get())
 
     def compute(self):

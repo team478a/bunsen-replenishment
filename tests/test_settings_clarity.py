@@ -8,7 +8,8 @@ from bunsen.ui import App
 from bunsen.backup import validate_database,create_backup,restore_backup
 from bunsen.service import Service
 
-VALUES=dict(cycle_days=1,lead_days=0,safety_days=1,coverage_days=2)
+FLAT=dict(cycle_days=1,lead_days=0,safety_days=1,coverage_days=2)
+VALUES={w:dict(FLAT) for w in ('KOBE','SUGITO')}
 class CommonSettingsTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.path=Path(self.temp.name);self.kit=create_kit(self.path/'kit',date(2026,11,9))
@@ -16,7 +17,8 @@ class CommonSettingsTests(unittest.TestCase):
         self.app.day.set('2026-11-09')
     def tearDown(self):self.app.service.close();self.root.destroy();self.temp.cleanup()
     def save(self,values=None):
-        for k,v in (values or VALUES).items():self.app.setting_values[k].set(str(v))
+        for w,conditions in (values or VALUES).items():
+            for k,v in conditions.items():self.app.setting_values[(w,k)].set(str(v))
         self.app.operator.set('架空担当');self.app.setting_reason.set('架空の共通条件')
         self.app.confirmed_action(self.app.setting_checked,self.app.apply_settings)
     def load(self):
@@ -30,7 +32,7 @@ class CommonSettingsTests(unittest.TestCase):
         self.save();(self.kit/'csv/requirements.csv').unlink();self.load()
         self.assertEqual(len(self.app.lines),2)
         for r in self.app.data.tables['requirements']:
-            self.assertEqual({k:r[k] for k in VALUES},VALUES)
+            self.assertEqual({k:r[k] for k in FLAT},VALUES[r['warehouse']])
         self.app.ack.set(True);self.app.issue(True)
         payload=self.app.service.get_issue(self.app.last_number)
         self.assertIn('common-settings.csv',payload['raw'])
@@ -41,22 +43,22 @@ class CommonSettingsTests(unittest.TestCase):
         self.assertTrue(all(r['lead_days']==0 for r in self.app.data.tables['requirements']))
     def test_unset_or_invalid_conditions_do_not_create_defaults(self):
         with self.assertRaises(DataError):self.load()
-        self.app.setting_values['cycle_days'].set('0')
+        self.app.setting_values[('KOBE','cycle_days')].set('0')
         with self.assertRaises(DataError):self.app.confirmed_action(self.app.setting_checked,self.app.apply_settings)
         self.assertIsNone(self.app.service.common_settings()['values'])
-        for values in [dict(VALUES,cycle_days=0),dict(VALUES,safety_days=-1),dict(VALUES,lead_days=True)]:
+        for values in [dict(FLAT,cycle_days=0),dict(FLAT,safety_days=-1),dict(FLAT,lead_days=True)]:
             with self.assertRaises(DataError):self.app.service.save_common_settings(values,'担当','確認',True,0)
     def test_change_stops_old_calculation_and_formal_plan_confirmation(self):
         self.save();self.load();data=self.app.data;lines=self.app.lines
         plan=self.app.service.calculate_delivery_plan(data,date(2026,11,9))
-        self.save(dict(VALUES,lead_days=1));self.assertIsNone(self.app.data);self.assertFalse(self.app.lines)
+        self.save({w:dict(FLAT,lead_days=1) for w in VALUES});self.assertIsNone(self.app.data);self.assertFalse(self.app.lines)
         with self.assertRaises(DataError):self.app.service.issue(data,lines,date(2026,11,9),'担当',True,True)
         with self.assertRaises(DataError):self.app.service.confirm_delivery_plan(plan['plan_id'],'担当',True)
     def test_snapshot_rejects_tampering_but_keeps_old_history(self):
         self.save();self.load();data=self.app.data
         raw=dict(data.raw);raw['requirements.csv']=raw['requirements.csv'].replace(',0,',',1,',1)
         with self.assertRaises(DataError):self.app.service.snapshot_data(raw)
-        self.save(dict(VALUES,lead_days=1))
+        self.save({w:dict(FLAT,lead_days=1) for w in VALUES})
         restored=self.app.service.snapshot_data(data.raw,data.digest)
         self.assertTrue(all(r['lead_days']==0 for r in restored.tables['requirements']))
     def test_persistence_backup_and_read_only(self):

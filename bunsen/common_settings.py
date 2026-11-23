@@ -1,23 +1,47 @@
-"""Reviewed application-wide conditions, independent of products and CSV import."""
+"""Reviewed warehouse conditions; preserve legacy application-wide proofs."""
 import csv,io,json
-from .core import DataError,WAREHOUSES,stamp
+from .core import DataError,WAREHOUSES,LABELS,stamp
 
 FIELDS=('cycle_days','lead_days','safety_days','coverage_days')
 FILE='common-settings.csv'
 HEADERS=('revision',)+FIELDS+('operator','reason','saved_at')
+WAREHOUSE_HEADERS=('warehouse',)+HEADERS
+
+def warehouse_specific(values):
+    return isinstance(values,dict) and set(values)==set(WAREHOUSES)
 
 def validate(values):
-    if not isinstance(values,dict) or set(values)!=set(FIELDS):raise DataError(['共通補充条件の4項目が必要です'])
+    if isinstance(values,dict) and set(values)&set(WAREHOUSES) and not warehouse_specific(values):raise DataError(['倉庫別補充条件にはKOBE（神戸）・SUGITO（杉戸）の両方が必要です'])
+    if warehouse_specific(values):
+        result={}
+        for w in WAREHOUSES:
+            try:
+                if not isinstance(values[w],dict) or set(values[w])!=set(FIELDS):raise DataError(['補充条件の4項目が必要です'])
+                result[w]=validate(values[w])
+            except DataError as exc:raise DataError([LABELS[w]+' / '+w+': '+e for e in exc.errors]) from exc
+        return result
+    if not isinstance(values,dict) or set(values)!=set(FIELDS):raise DataError(['補充条件の4項目が必要です'])
     for key,value in values.items():
         if type(value) is not int or value<0 or (key in ('cycle_days','coverage_days') and value==0):raise DataError(['補充間隔・対象日数は1以上、配送日数・安全日数は0以上の整数です'])
     return dict(values)
 
 def proof(state):
     from .requirements_data import csv_text
+    if warehouse_specific(state['values']):
+        return csv_text(','.join(WAREHOUSE_HEADERS),[dict(warehouse=w,revision=state['revision'],**state['values'][w],operator=state['operator'],reason=state['reason'],saved_at=state['saved_at']) for w in WAREHOUSES])
     return csv_text(','.join(HEADERS),[dict(revision=state['revision'],**state['values'],operator=state['operator'],reason=state['reason'],saved_at=state['saved_at'])])
 
 def parse(text):
     reader=csv.DictReader(io.StringIO(text),strict=True);rows=list(reader)
+    if reader.fieldnames==list(WAREHOUSE_HEADERS):
+        if len(rows)!=len(WAREHOUSES) or [r.get('warehouse') for r in rows]!=list(WAREHOUSES):raise DataError(['倉庫別補充条件の倉庫番号に欠損・重複・不一致があります'])
+        from .requirements_data import csv_text
+        states=[parse(csv_text(','.join(HEADERS),[{k:r[k] for k in HEADERS}])) for r in rows]
+        base=states[0]
+        if any(any(s[k]!=base[k] for k in ('revision','operator','reason','saved_at')) for s in states):raise DataError(['倉庫別補充条件の版・確認記録が一致しません'])
+        state=dict(base,values={w:s['values'] for w,s in zip(WAREHOUSES,states)})
+        if proof(state)!=text:raise DataError(['倉庫別補充条件の証跡形式が不一致です'])
+        return state
     if reader.fieldnames!=list(HEADERS) or len(rows)!=1 or None in rows[0] or any(v is None for v in rows[0].values()):raise DataError(['共通条件の保存証跡が不正です'])
     row=rows[0]
     for key in ('revision',)+FIELDS:
@@ -31,6 +55,8 @@ def parse(text):
 
 def requirements(state,products):
     from .requirements_data import SCHEMA,csv_text
+    if warehouse_specific(state['values']):
+        return csv_text(SCHEMA['requirements'],[dict(warehouse=w,product=p,**state['values'][w],confirmed='yes') for w in WAREHOUSES for p in sorted(products)])
     return csv_text(SCHEMA['requirements'],[dict(warehouse=w,product=p,**state['values'],confirmed='yes') for w in WAREHOUSES for p in sorted(products)])
 
 class CommonSettings:
@@ -52,7 +78,7 @@ class CommonSettings:
     def assert_common_settings_current(self,data):
         if FILE in data.raw:
             state=parse(data.raw[FILE])
-            if state!=self.common_settings():raise DataError(['共通補充条件が更新されています。データを再取込・再計算してください'])
+            if state!=self.common_settings():raise DataError(['補充条件が更新されています。データを再取込・再計算してください'])
 
     def import_common_folder(self,folder,use_registered_jan):
         from pathlib import Path

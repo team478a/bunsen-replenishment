@@ -1,3 +1,7 @@
+# 0.7.6 倉庫別補充条件の内部証跡
+
+保存条件はKOBE/SUGITO別の4項目とする。内部common-settings.csvはwarehouse列付きの2行を新形式とし、旧1行は原本互換用に読み取る。倉庫の欠損・重複・版の不一致、生成したrequirements.csvとの不一致は停止する。外部CSVの倉庫番号は確認済み対応だけを使う。詳細は[倉庫別条件への改修](warehouse-settings.md)。
+
 0.7.0のJAN方式には[予測結果CSV取込](forecast-csv-import.md)を追加。原本証跡付きの変換に限り小数Pとorder_basis=not_addedを使用します。以下の旧契約の整数・includedの意味は変更しません。
 
 最新のJAN・物理PL・入庫対象外方式は [jan-pl-contract.md](jan-pl-contract.md) を参照。以下は旧v2の原本互換契約です。
