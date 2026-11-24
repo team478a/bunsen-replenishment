@@ -142,9 +142,11 @@ def write_reviewed(reports, decisions, products, operator, folder,scope=None):
     if not operator.strip() or set(reports)!=set(WAREHOUSES):raise DataError(['担当者・両倉庫の在庫PDFが必要です'])
     known={p['product'] for p in products}
     if not known or len(known)!=len(products):raise DataError(['確認済みJANマスタが必要です'])
-    expected={(w,p) for w in WAREHOUSES for p in known}
+    skip_unlisted=all(e.get('skip_unlisted') is True for e in reports.values())
+    if any('skip_unlisted' in e for e in reports.values()) and not skip_unlisted:raise DataError(['PDF未掲載の除外方式が倉庫間で不一致です'])
+    expected={(w,p) for w in WAREHOUSES for p in known if not skip_unlisted or p in {r['product'] for r in reports[w]['report']['rows']}}
     if set(decisions)!=expected:raise DataError(['倉庫・登録JANごとの数量確認が必要です'])
-    inventory=[];evidence=[];audit=[]
+    inventory=[];evidence=[];audit=[];presence=[]
     for warehouse in WAREHOUSES:
         entry=reports[warehouse];report=entry['report']
         content=base64.b64decode(report['content_base64'],validate=True)
@@ -165,7 +167,10 @@ def write_reviewed(reports, decisions, products, operator, folder,scope=None):
             if entry['time_origin']=='pdf_footer' and instant.astimezone(JST).strftime('%H:%M:%S')!=printed_time(canonical):raise DataError(['PDF左下時刻と採用時刻が不一致です。手修正として確認してください'])
         name=warehouse+'-report.pdf';source={r['product']:r for r in canonical['rows']}
         evidence.append(dict(source_pdf=name,sha256=canonical['sha256'],content_base64=canonical['content_base64']))
+        if skip_unlisted:
+            presence.append(dict(warehouse=warehouse,missing_json=json.dumps(sorted(known-set(source))),source_pdf=name,sha256=canonical['sha256']))
         for product in sorted(known):
+            if (warehouse,product) not in expected:continue
             decision=decisions[(warehouse,product)];quantity=decision['quantity_p'];reason=decision['reason'].strip()
             if type(quantity) is not int or quantity<0:raise DataError([warehouse+' '+product+': 確認済みの0以上の整数Pが必要です'])
             row=source.get(product);suggested=suggested_quantity(row,policy) if row else None
@@ -176,6 +181,9 @@ def write_reviewed(reports, decisions, products, operator, folder,scope=None):
     outputs=master_csvs(products)
     outputs.update({'inventory.csv':csv_text(SCHEMA['inventory'],inventory),'source_evidence.csv':csv_text(EVIDENCE,evidence)})
     review=dict(reader=READER_VERSION,operator=operator.strip(),reports=reports,decisions=audit)
+    if skip_unlisted:
+        from .pdf_presence import FILE,HEADERS
+        outputs[FILE]=csv_text(HEADERS,presence);review['unlisted']=presence
     if scope is not None:
         from .product_scope import FILE,text
         outputs[FILE]=text(scope);review['excluded_products']=scope['excluded']

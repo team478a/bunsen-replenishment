@@ -96,7 +96,14 @@ def inspect(folder, now, master_csvs=None):
             raw[FILE]=content.decode('utf-8-sig').replace('\r\n','\n').replace('\r','\n')
             common=parse(raw[FILE])
             if stamp(common['saved_at'])>now:raise ValueError('共通条件の保存日時が未来です')
-        allowed = {k+'.csv' for k in SCHEMA} | {'source_evidence.csv',REVIEW_FILE,FILE,SCOPE_FILE}
+        from .pdf_presence import FILE as PRESENCE_FILE,verify as verify_presence
+        skipped=set()
+        if (folder/PRESENCE_FILE).exists():
+            content=(folder/PRESENCE_FILE).read_bytes();guard.remember(folder/PRESENCE_FILE,content)
+            raw[PRESENCE_FILE]=content.decode('utf-8-sig').replace('\r\n','\n').replace('\r','\n')
+            proof=(folder/'source_evidence.csv').read_bytes();guard.remember(folder/'source_evidence.csv',proof)
+            presence_evidence=proof.decode('utf-8-sig').replace('\r\n','\n').replace('\r','\n')
+        allowed = {k+'.csv' for k in SCHEMA} | {'source_evidence.csv',REVIEW_FILE,FILE,SCOPE_FILE,PRESENCE_FILE}
         for filename in guard.initial:
             if filename.endswith('.csv') and filename not in allowed:
                 guard.remember(folder/filename,(folder/filename).read_bytes())
@@ -151,6 +158,7 @@ def inspect(folder, now, master_csvs=None):
                 info['status']='read_error';error(table,'file',f'読取不能: {exc}')
         if expected_forecast is not None and raw.get('forecast.csv')!=expected_forecast:
             error('forecast','quantity_p','予測CSVと確認済み原本・採用列・倉庫対応が不一致です。再変換してください')
+        if PRESENCE_FILE in raw:skipped=verify_presence(raw[PRESENCE_FILE],presence_evidence,tables['inventory'])
         if scope:
             for table,rows in tables.items():tables[table]=[r for r in rows if r['product'] not in scope['excluded']]
         products={r['product'] for r in tables['products']}
@@ -162,6 +170,7 @@ def inspect(folder, now, master_csvs=None):
         for w in WAREHOUSES:
             for p in sorted(products):
                 for table in ('inventory','requirements','pallets'):
+                    if (w,p) in skipped:continue
                     if not any((r['warehouse'],r['product'])==(w,p) for r in tables[table]):
                         error(table,'warehouse+product','必須行がありません',dict(warehouse=w,product=p))
         embedded={}; evidence_path=folder/'source_evidence.csv'
@@ -195,7 +204,16 @@ def inspect(folder, now, master_csvs=None):
                 if digest!=row['source_sha256']:raise ValueError('PDF原本のSHA-256が不一致です')
                 evidence.append(dict(source_pdf=name,sha256=digest,content_base64=base64.b64encode(content).decode('ascii')))
             except (OSError,KeyError,ValueError) as exc:error('inventory','source_pdf',f'PDF証跡を確認できません: {exc}',row)
-        if set(embedded)-set(used):error('source_evidence','source_pdf','在庫に対応しないPDF証跡があります')
+        if PRESENCE_FILE in raw:
+            # Keep both original PDFs even when one warehouse has no matching target JAN.
+            for name in set(embedded)-set(used):
+                content=embedded[name];evidence.append(dict(source_pdf=name,sha256=hashlib.sha256(content).hexdigest(),content_base64=base64.b64encode(content).decode('ascii')))
+            for table in ('inventory','forecast','requirements','pallets'):
+                tables[table]=[r for r in tables[table] if (r['warehouse'],r['product']) not in skipped]
+            used_products={r['product'] for r in tables['inventory']}
+            tables['products']=[r for r in tables['products'] if r['product'] in used_products]
+            if not used_products:error('inventory','product','PDFに掲載された補充対象JANがありません')
+        elif set(embedded)-set(used):error('source_evidence','source_pdf','在庫に対応しないPDF証跡があります')
         raw['source_evidence.csv']=csv_text(EVIDENCE,sorted(evidence,key=lambda r:r['source_pdf']))
         observed,consistency=guard.finish();errors.extend(observed)
     except (OSError,ValueError,csv.Error,UnicodeError) as exc:
