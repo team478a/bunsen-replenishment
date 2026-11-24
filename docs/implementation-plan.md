@@ -1,3 +1,5 @@
+0.7.7追加: 乾麺倉庫の確認済み実在庫CSVは、必要補充計算を変えず、神戸・杉戸の指示数量合計との別照合に使用する。CSV契約・画面・履歴・検証計画は [乾麺倉庫実在庫取込](dry-stock-intake.md) を参照。
+
 JAN・物理PL方式の追加計画は [jan-pl-plan.md](jan-pl-plan.md)、契約・操作は [jan-pl-contract.md](jan-pl-contract.md)。以下は従来実装の計画記録。
 
 ## 現行改修
