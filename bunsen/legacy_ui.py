@@ -403,8 +403,10 @@ class LegacyApp:
             action()
         except (DataError, ValueError, OSError, sqlite3.Error) as exc:
             self.ack.set(False)
-            self.show(str(exc))
-            messagebox.showerror('不備・未確認 — 処理を停止しました', str(exc))
+            from .error_messages import describe_error
+            title,message=describe_error(exc)
+            self.show(message)
+            messagebox.showerror(title,message)
 
     def show(self, text):
         self.detail.configure(state='normal')

@@ -48,14 +48,14 @@ def table(rows,widths,compact=False):
 
 add('現場担当者・管理担当者向け  /  Windows版','small')
 add('ブンセン\n補充出荷指示アプリ'.replace('\n','<br/>'),'title')
-add('操作マニュアル  0.7.8-preview.1','h2')
+add('操作マニュアル  0.7.9-preview.1','h2')
 add('ムロオ神戸・杉戸へ、いつ・何PLの補充が必要かを確認し、倉庫別のExcel・PDFを作成するための手順です。')
 box('日常の流れ','在庫PDFを読み取る → 予測CSVを取込 → データを開いて計算 → 数量を確認・修正 → 確定してExcel・PDF出力')
 table([['行いたいこと','参照ページ'],['初めて起動する・必要データをそろえる','2'],['ムロオの在庫PDFを読み取る','3'],['予測結果CSVを取り込む','4'],['必要量を確認し、出荷指示書を作る','5'],['履歴・バックアップ・実在庫の数量照合','6・11・12'],['エラーで止まったとき・最終チェック','7'],['JANマスタCSVの一括登録','8'],['補充条件の各欄に入れる内容','9'],['PDF未掲載・JANの削除とCSV置換','10']],[373,118],compact=True)
 add('この版の数量ルール','h2')
 add('商品はJAN単位、出荷は整数の物理PL単位です。神戸と杉戸で1PLのP数が異なる場合は、それぞれの商品マスタを使います。甲・混載・端数パレット出荷は対象外です。')
 add('大口・特売は加算せず、「予測出荷数量（パック）」を使用します。ブンセン側在庫・製造数量・確定入庫予定・輸送中数量は必要補充量の計算に使用しません。乾麺倉庫の実在庫は別の数量照合に使用できます。')
-add('対象アプリ: 0.7.8-preview.1 / 資料作成日: 2026年11月24日','small')
+add('対象アプリ: 0.7.9-preview.1 / 資料作成日: 2026年11月24日','small')
 add('本書は現行実装に基づく操作説明です。正式業務設定・倉庫コード対応・現場受入の承認を代替するものではありません。','small')
 
 heading(2,'起動と、最初の準備')
@@ -156,7 +156,7 @@ add('「数量上は充足」は照合時点の数量比較です。出荷予約
 
 def footer(canvas,doc):
  w,h=A4;canvas.setStrokeColor(colors.HexColor('#CEDCE3'));canvas.line(44,43,w-44,43)
- canvas.setFont(FONT,8);canvas.setFillColor(MUTED);canvas.drawString(44,29,'ブンセン補充出荷指示アプリ | 0.7.8-preview.1 操作マニュアル')
+ canvas.setFont(FONT,8);canvas.setFillColor(MUTED);canvas.drawString(44,29,'ブンセン補充出荷指示アプリ | 0.7.9-preview.1 操作マニュアル')
  canvas.drawRightString(w-44,29,f'{doc.page} / 12')
  canvas.setFillColor(TEAL);canvas.rect(0,h-8,w,8,stroke=0,fill=1)
 doc=SimpleDocTemplate(str(OUT),pagesize=A4,rightMargin=52,leftMargin=52,topMargin=35,bottomMargin=57,title='ブンセン補充出荷指示アプリ 操作マニュアル',author='ブンセン補充出荷指示アプリ',pageCompression=1)

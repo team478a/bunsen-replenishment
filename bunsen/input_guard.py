@@ -40,11 +40,11 @@ class InputGuard:
         def compare(current):
             for name in sorted(self.initial.keys() | current.keys()):
                 if name not in self.initial:
-                    changes[name] = '読取中にCSVが追加されました'
+                    changes[name] = '読み込み中にファイルが追加されました'
                 elif name not in current:
-                    changes[name] = '読取中にCSVが削除・移動されました'
+                    changes[name] = '読み込み中にファイルが削除または移動されました'
                 elif self.initial[name] != current[name]:
-                    changes[name] = '読取前後でファイル属性・識別が変わりました'
+                    changes[name] = '読み込み中にファイルが変更または置き換えられました'
 
         try:
             current = self._inventory()
@@ -55,15 +55,15 @@ class InputGuard:
                     continue
                 try:
                     if (self.folder / name).read_bytes() != original:
-                        changes[name] = '読取前後でCSVの内容が変わりました'
+                        changes[name] = '読み込み中にファイルの内容が変わりました'
                 except OSError:
-                    failures[name] = '読取後のCSV内容を再照合できません'
+                    failures[name] = '読み込み後にファイルを開き直せず、内容を確認できませんでした'
             compare(self._inventory())
         except OSError:
-            failures[str(self.folder)] = '読取後のCSV一覧・属性を再照合できません'
+            failures[str(self.folder)] = '読み込み後にフォルダーを確認できませんでした'
         for name in self.initial.keys() - self.contents.keys():
             if name not in changes:
-                failures[name] = '初回内容を取得できず、前後のCSV内容を照合できません'
+                failures[name] = 'ファイルを最初に読み込めず、内容が変わっていないか確認できませんでした'
         issues = [ValidationIssue(name, 'input_file', 'INPUT_CHANGED', reason)
                   for name, reason in sorted(changes.items())]
         issues.extend(ValidationIssue(name, 'input_file', 'INPUT_RECHECK_FAILED', reason)
