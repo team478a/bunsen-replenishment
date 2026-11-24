@@ -19,7 +19,7 @@ class SimpleUI:
         self.write_button(bar,text='データを開いて計算',style='Primary.TButton',command=lambda:self.run(self.open_and_compute)).pack(side='left',padx=5)
         self.write_button(bar,text='再計算',command=lambda:self.run(self.compute)).pack(side='left')
         stock=ttk.Frame(self.daily);stock.pack(fill='x',pady=4)
-        ttk.Button(stock,text='乾麺倉庫の実在庫CSV取込',command=lambda:self.run(self.dry_stock_dialog)).pack(side='left',padx=4)
+        ttk.Button(stock,text='乾麺倉庫の在庫取込（Excel・CSV）',command=lambda:self.run(self.dry_stock_dialog)).pack(side='left',padx=4)
         ttk.Button(stock,text='実在庫と指示数量を照合',command=lambda:self.run(self.dry_stock_check)).pack(side='left',padx=4)
         self.result_status=tk.StringVar(value='データのフォルダーを選んでください')
         responsive_label(self.daily,textvariable=self.result_status,style='Status.TLabel').pack(fill='x',pady=5)
