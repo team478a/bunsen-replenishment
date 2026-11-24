@@ -48,11 +48,26 @@ def read_csv(path):
     if path.read_bytes()!=content:raise DataError(['読取中にCSVが変更されました'])
     return dict(report,path=str(path.resolve()))
 
+def read_stock(path):
+    if Path(path).suffix.lower()=='.csv':return read_csv(path)
+    if Path(path).suffix.lower()!='.xlsx':raise DataError(['実在庫はCSVまたは.xlsxを選択してください'])
+    from .dry_stock_excel import analyse_excel
+    path=Path(path)
+    if path.stat().st_size>LIMIT:raise DataError(['乾麺在庫Excelは5MB以下にしてください'])
+    content=path.read_bytes();report=analyse_excel(content)
+    if path.read_bytes()!=content:raise DataError(['読取中にExcelが変更されました'])
+    return dict(report,path=str(path.resolve()))
+
+def available_p(row):
+    return row['available_p'] if 'available_p' in row else row['stock_p']-row['reserved_p']
+
 def checked_report(report):
     if not isinstance(report,dict) or not isinstance(report.get('source_base64'),str) or len(report['source_base64'])>LIMIT*2:raise DataError(['実在庫の原本証跡が不正です'])
-    try:fresh=analyse(base64.b64decode(report['source_base64'],validate=True))
+    from .dry_stock_excel import FORMAT,analyse_excel
+    if 'source_format' in report and report['source_format']!=FORMAT:raise DataError(['未対応の実在庫原本形式です'])
+    try:fresh=(analyse_excel if report.get('source_format')==FORMAT else analyse)(base64.b64decode(report['source_base64'],validate=True))
     except (ValueError,TypeError) as exc:raise DataError(['実在庫の原本証跡が不正です']) from exc
-    if any(report.get(k)!=v for k,v in fresh.items()):raise DataError(['実在庫CSVの読取結果が原本と不一致です'])
+    if any(report.get(k)!=v for k,v in fresh.items()):raise DataError(['実在庫の読取結果が原本と不一致です'])
     if fresh['errors']:raise DataError(fresh['errors'])
     return fresh
 
@@ -77,10 +92,10 @@ def compare(stock,planned,dispatch,at):
         entry['required_p']+=number(line['required_p']);entry['quantity_p']+=q;entry[w]+=q
     result=[]
     for p,total in sorted(totals.items()):
-        row=inventory.get(p);usable=row['stock_p']-row['reserved_p'] if row else None
-        valid=same_day and row is not None
+        row=inventory.get(p);usable=available_p(row) if row else None
+        valid=same_day and row is not None and usable is not None
         shortage=max(0,total['quantity_p']-usable) if valid else None
-        status=('不足' if shortage else '数量上は充足') if valid else ('在庫未取込・確認不能' if not stock else 'JAN未掲載・確認不能' if row is None else '基準日違い・確認不能')
+        status=('不足' if shortage else '数量上は充足') if valid else ('在庫未取込・確認不能' if not stock else 'JAN未掲載・確認不能' if row is None else '出荷可能数量未確認' if usable is None else '基準日違い・確認不能')
         result.append(dict(total,stock_p=row['stock_p'] if row else None,reserved_p=row['reserved_p'] if row else None,usable_p=usable,shortage_p=shortage,status=status))
     return canonical(result)
 
@@ -99,7 +114,7 @@ class DryStockIntake:
         from .service import encode
         self.ensure_writable();fresh=checked_report(report)
         if not isinstance(operator,str) or not operator.strip():raise DataError(['実在庫の確認者を入力してください'])
-        if report.get('path') and read_csv(report['path'])['source_sha256']!=fresh['source_sha256']:raise DataError(['元の実在庫CSVが変更されています。再読取してください'])
+        if report.get('path') and read_stock(report['path'])['source_sha256']!=fresh['source_sha256']:raise DataError(['元の実在庫ファイルが変更されています。再読取してください'])
         payload=dict(report=fresh,as_of=stamp(as_of).isoformat(),operator=operator.strip(),acknowledged=acknowledged,base_revision=expected_revision)
         validate_import(payload,self.clock().isoformat())
         with self.db:
