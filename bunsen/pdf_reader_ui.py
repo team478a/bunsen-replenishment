@@ -47,7 +47,7 @@ class PDFInventoryDialog(tk.Toplevel):
         ttk.Label(editor,text='変更・確認根拠').pack(side='left');ttk.Entry(editor,textvariable=self.reason,width=36).pack(side='left',padx=5)
         ttk.Button(editor,text='反映',command=lambda:self.app.run(self.apply_edit)).pack(side='left',padx=4)
         ttk.Button(body,text='選択JANを補充対象外にする（マスタ更新）',command=lambda:self.app.run(self.exclude_selected)).pack(anchor='w',pady=5)
-        responsive_label(body,text='PDFに商品が未掲載の場合は「空欄を0」の対象ではありません。不要な商品は、担当者と理由を入力して対象外にします（神戸・杉戸の両方と今後の補充対象から外れます）。').pack(fill='x',pady=4)
+        responsive_label(body,text='PDFに未掲載のJANは、その倉庫の今回の取込・計算から自動で除外します。在庫0にはせず、JANマスタは残します。次回のPDFに掲載されれば再び対象になります。').pack(fill='x',pady=4)
         self.note=tk.StringVar(value='原本の作成日時と在庫基準日時は区別してください。集計日と一致する確認済み基準日時を指定します。')
         responsive_label(body,textvariable=self.note).pack(fill='x',pady=4)
         actions=ttk.Frame(body);actions.pack(fill='x',pady=6)
@@ -93,9 +93,11 @@ class PDFInventoryDialog(tk.Toplevel):
 
     def populate(self,warehouse):
         report=self.reports[warehouse];source={r['product']:r for r in report['rows']};known={r['product']:r for r in self.products}
-        for product in sorted(source.keys()|known.keys()):
+        for product in sorted(source):
             row=source.get(product);value=suggested_quantity(row,POLICIES[self.meta[warehouse]['policy'].get()]) if row else None
             self.items[(warehouse,product)]=dict(source=row,target=product in known,name=known[product]['name'] if product in known else row['name'],quantity=value,suggested=value,reason='',edited=False)
+        missing=sorted(set(known)-set(source))
+        self.status[warehouse].set(f"集計日 {report['stock_date']} / {report['pages']}ページ / 作成 {report['printed_at']} / 未掲載 {len(missing)}件は今回対象外")
         self.refresh()
 
     def refresh(self):
@@ -163,7 +165,7 @@ class PDFInventoryDialog(tk.Toplevel):
             at=r['stock_date']+'T'+text+(':00' if len(text)==5 else '')+'+09:00' if re.fullmatch(r'\d{2}:\d{2}(?::\d{2})?',text) else text
             try:stamp(at)
             except ValueError:raise DataError([LABELS[w]+': 確認済み在庫基準時刻をHH:MMで入力してください'])
-            reports[w]=dict(report=r,as_of=at,basis='closing',time_origin='pdf_footer' if text==printed_time(r) else 'manual',blank_policy=POLICIES[self.meta[w]['policy'].get()])
+            reports[w]=dict(report=r,as_of=at,basis='closing',time_origin='pdf_footer' if text==printed_time(r) else 'manual',blank_policy=POLICIES[self.meta[w]['policy'].get()],skip_unlisted=True)
         decisions={key:dict(quantity_p=item['quantity'],reason=item['reason']) for key,item in self.items.items() if item['target']}
         folder=filedialog.askdirectory(parent=self,title='確認済み在庫CSVの新規保存先')
         if not folder:return

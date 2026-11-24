@@ -51,7 +51,7 @@ def copy_limited(source, destination, limit):
 
 
 def raw_digest(raw):
-    if not isinstance(raw, dict) or not raw or any(name not in {k + '.csv' for k in (SCHEMA.keys() | V2_SCHEMA.keys() | REQUIREMENTS_SCHEMA.keys() | {'source_evidence','forecast-review','common-settings','product-scope'})} or not isinstance(value, str) for name, value in raw.items()):
+    if not isinstance(raw, dict) or not raw or any(name not in {k + '.csv' for k in (SCHEMA.keys() | V2_SCHEMA.keys() | REQUIREMENTS_SCHEMA.keys() | {'source_evidence','forecast-review','common-settings','product-scope','pdf-presence'})} or not isinstance(value, str) for name, value in raw.items()):
         raise DataError(['取込原本の形式が不正'])
     return hashlib.sha256(json.dumps(raw, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 

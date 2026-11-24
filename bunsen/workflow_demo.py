@@ -31,15 +31,16 @@ def main(output):
         for w in ('KOBE','SUGITO'):
             pdf=kit/(w+'.pdf');pdf.write_bytes(fictional_report(w,date='2026/11/08',printed_day='2026/11/09'))
             stock.load(w,pdf);assert stock.meta[w]['as_of'].get()=='18:00:01';assert 'basis' not in stock.meta[w]
-        assert stock.items[('KOBE',extra)]['quantity'] is None
-        stock.tree.selection_set(str(stock.keys.index(('KOBE',extra))));stock.selected();stock.reason.set('架空の補充対象外確認');stock.exclude_selected()
+        assert ('KOBE',extra) not in stock.items and ('SUGITO',extra) not in stock.items
+        assert len(app.service.jan_master()['products'])==2 and not app.service.jan_master()['excluded']
         with patch('bunsen.pdf_reader_ui.filedialog.askdirectory',return_value=str(target)):stock.save()
         for w in ('KOBE','SUGITO'):
             for key,value in dict(cycle_days=1,lead_days=0,safety_days=1,coverage_days=2).items():app.setting_values[(w,key)].set(str(value))
         app.setting_reason.set('架空の倉庫別・商品共通条件');app.confirmed_action(app.setting_checked,app.apply_settings)
         assert not (target/'requirements.csv').exists()
         app.data=app.service.import_folder(target,workflow=2,use_common_settings=True);app.day.set('2026-11-09');app.compute()
-        assert 'common-settings.csv' in app.data.raw
+        assert 'common-settings.csv' in app.data.raw and 'pdf-presence.csv' in app.data.raw
+        assert len(app.data.tables['products'])==1
         assert [r['quantity_p'] for r in app.lines]==[240,480]
         assert all(r['timeline'][0]['date']=='2026-11-09' for r in app.lines)
         assert all(r['inventory_basis']=='closing' for r in app.lines)

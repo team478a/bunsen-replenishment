@@ -32,12 +32,13 @@ class JanScopeTests(unittest.TestCase):
         return d
     def test_blank_zero_does_not_make_an_absent_product_zero(self):
         d=self.popup()
-        self.assertEqual(d.items[('KOBE',JAN)]['quantity'],70);self.assertIsNone(d.items[('KOBE',OTHER)]['quantity'])
-        with self.assertRaisesRegex(DataError,'PDF未掲載'):d.save()
-        self.assertEqual(len(self.s.jan_master()['products']),2);d.destroy()
+        self.assertEqual(d.items[('KOBE',JAN)]['quantity'],70);self.assertNotIn(('KOBE',OTHER),d.items)
+        target=self.path/'saved';target.mkdir()
+        with patch('bunsen.pdf_reader_ui.filedialog.askdirectory',return_value=str(target)):d.save()
+        self.assertNotIn(OTHER,(target/'inventory.csv').read_text(encoding='utf-8-sig'))
+        self.assertEqual(len(self.s.jan_master()['products']),2);self.assertFalse(self.s.jan_master()['excluded'])
     def test_pdf_can_exclude_non_tv_then_issue_without_fake_zero(self):
-        d=self.popup();key=d.keys.index(('KOBE',OTHER));d.tree.selection_set(str(key));d.selected();d.reason.set('非TVで補充対象外')
-        d.exclude_selected();self.assertFalse(d.items[('SUGITO',OTHER)]['target'])
+        self.scope();d=self.popup();self.assertNotIn(('SUGITO',OTHER),d.items)
         target=self.path/'saved';target.mkdir()
         with patch('bunsen.pdf_reader_ui.filedialog.askdirectory',return_value=str(target)):d.save()
         self.assertNotIn(OTHER,(target/'inventory.csv').read_text(encoding='utf-8-sig'));self.assertTrue((target/FILE).exists())
@@ -94,3 +95,50 @@ class JanScopeTests(unittest.TestCase):
         row=self.s.db.execute("SELECT id,payload FROM events WHERE kind='jan_master_change' ORDER BY id DESC LIMIT 1").fetchone();payload=json.loads(row[1]);payload['excluded'][OTHER]['reason']='改変'
         self.s.db.execute('UPDATE events SET payload=? WHERE id=?',(json.dumps(payload),row[0]));self.s.db.commit()
         with self.assertRaises(DataError):validate_database(self.s.db)
+
+    def test_skip_is_warehouse_local_and_reappearing_pdf_restores_target(self):
+        d=self.popup();path=self.path/'sugito-other.pdf';path.write_bytes(fictional_report('SUGITO',jan=OTHER,date='2026/11/08'))
+        d.load('SUGITO',path)
+        target=self.path/'local';target.mkdir()
+        with patch('bunsen.pdf_reader_ui.filedialog.askdirectory',return_value=str(target)):d.save()
+        source=fictional_source(DAY).decode('utf-8-sig');reader=csv.DictReader(io.StringIO(source));rows=list(reader);stream=io.StringIO();writer=csv.DictWriter(stream,fieldnames=reader.fieldnames,lineterminator='\n');writer.writeheader();writer.writerows(rows+[dict(r,JAN=OTHER) for r in rows])
+        self.s.save_forecast_csv(analyse_bytes(stream.getvalue().encode()),MAPPING,'担当',True,0,0,target)
+        self.s.save_common_settings(dict(cycle_days=1,lead_days=0,safety_days=1,coverage_days=2),'担当','架空条件',True,0)
+        data=self.s.import_folder(target,workflow=2,use_common_settings=True,use_registered_jan=True)
+        lines=self.s.calculate(data,DAY)
+        self.assertEqual({(r['warehouse'],r['product']) for r in lines},{('KOBE',JAN),('SUGITO',OTHER)})
+        self.assertEqual(len(self.s.jan_master()['products']),2);self.assertFalse(self.s.jan_master()['excluded'])
+        final=self.s.issue(data,lines,DAY,'担当',True,True);self.assertIn('pdf-presence.csv',final['raw']);validate_database(self.s.db)
+        restored=self.s.snapshot_data(final['raw'],final['digest']);self.assertEqual(len(restored.tables['inventory']),2)
+        d=self.popup();self.assertIn(('SUGITO',JAN),d.items);d.destroy()
+    def test_skip_proof_cannot_hide_listed_product_or_be_removed(self):
+        d=self.popup();target=self.path/'proof';target.mkdir()
+        with patch('bunsen.pdf_reader_ui.filedialog.askdirectory',return_value=str(target)):d.save()
+        from bunsen.pdf_presence import verify
+        from bunsen.requirements_data import csv_text
+        proof=target/'pdf-presence.csv';reader=csv.DictReader(io.StringIO(proof.read_text(encoding='utf-8-sig')));rows=list(reader)
+        rows[0]['missing_json']=json.dumps([JAN,OTHER])
+        with self.assertRaises(DataError):verify(csv_text(','.join(reader.fieldnames),rows),(target/'source_evidence.csv').read_text(encoding='utf-8-sig'))
+        # Removing evidence must restore strict validation, never infer zero.
+        from bunsen.requirements_data import inspect
+        import shutil
+        shutil.copyfile(self.kit/'csv/forecast.csv',target/'forecast.csv');shutil.copyfile(self.kit/'csv/requirements.csv',target/'requirements.csv')
+        proof.unlink();self.assertTrue(inspect(target,NOW).issues)
+    def test_listed_blank_still_stops_without_confirmed_zero_rule(self):
+        d=self.popup();d.meta['KOBE']['policy'].set('空欄は未確認');d.change_policy('KOBE')
+        with self.assertRaisesRegex(DataError,'確認数量が未確認'):d.save()
+        d.destroy()
+
+    def test_warehouse_with_no_target_rows_preserves_both_originals(self):
+        self.scope();d=self.popup();path=self.path/'other.pdf';path.write_bytes(fictional_report('SUGITO',jan=OTHER,date='2026/11/08'));d.load('SUGITO',path)
+        target=self.path/'empty-warehouse';target.mkdir()
+        with patch('bunsen.pdf_reader_ui.filedialog.askdirectory',return_value=str(target)):d.save()
+        self.s.save_forecast_csv(analyse_bytes(fictional_source(DAY)),MAPPING,'担当',True,0,0,target)
+        self.s.save_common_settings(dict(cycle_days=1,lead_days=0,safety_days=1,coverage_days=2),'担当','架空条件',True,0)
+        data=self.s.import_folder(target,workflow=2,use_common_settings=True);lines=self.s.calculate(data,DAY)
+        self.assertEqual([(r['warehouse'],r['product']) for r in lines],[('KOBE',JAN)])
+        self.s.snapshot_data(data.raw,data.digest)
+        from bunsen.pdf_presence import verify
+        proof=(target/'pdf-presence.csv').read_text(encoding='utf-8-sig');evidence=(target/'source_evidence.csv').read_text(encoding='utf-8-sig')
+        bad=[dict(data.tables['inventory'][0],source_sha256='0'*64)]
+        with self.assertRaises(DataError):verify(proof,evidence,bad)
