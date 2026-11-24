@@ -92,6 +92,7 @@ def validate_database(db):
         jan_revision,jan_products=0,{}
         jan_excluded={}
         common_revision,common_values=0,None
+        staging_stock=None
         for event_id, at, kind, content in db.execute('SELECT * FROM events ORDER BY id'):
             stamp(at)
             payload = json.loads(content)
@@ -99,6 +100,14 @@ def validate_database(db):
                 raise DataError(['操作イベントの形式が不正'])
             if kind == 'import' and raw_digest(payload.get('raw')) != payload.get('digest'):
                 raise DataError(['取込イベントの原本ハッシュが不一致'])
+            if kind=='dry_stock_import':
+                from .dry_stock_intake import validate_import
+                validate_import(payload,at)
+                if type(payload.get('base_revision')) is not int or payload['base_revision']!=(staging_stock['revision'] if staging_stock else 0):raise DataError(['乾麺倉庫実在庫の版履歴が不整合'])
+                staging_stock=dict(revision=event_id,**payload)
+            if kind=='dry_stock_check':
+                from .dry_stock_intake import validate_check
+                validate_check(payload,staging_stock,at)
             if kind=='common_settings_change':
                 from .common_settings import validate
                 after=validate(payload.get('after'))

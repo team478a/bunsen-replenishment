@@ -149,6 +149,9 @@ def run_smoke(output):
         from .warehouse_demo import main as run_warehouse
         run_warehouse(home/'warehouse-kit')
         checks.append('warehouse_specific_conditions_arrival_and_reports')
+        from .dry_stock_demo import main as run_dry_stock
+        run_dry_stock(home/'dry-stock-kit')
+        checks.append('dry_stock_csv_and_joint_quantity_comparison')
     result = dict(version=__version__, frozen=bool(getattr(sys, 'frozen', False)),
                   executable=Path(sys.executable).name, checks=checks, success=True)
     output.parent.mkdir(parents=True, exist_ok=True)
