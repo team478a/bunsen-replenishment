@@ -1,3 +1,3 @@
 """Local CSV replenishment application."""
 
-__version__ = '0.7.8-preview.1'
+__version__ = '0.7.9-preview.1'

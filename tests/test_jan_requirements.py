@@ -104,6 +104,46 @@ class JanRequirementsTests(unittest.TestCase):
         with patch.object(SourceGuard,'finish',changed):
             with self.assertRaisesRegex(DataError,'変わ|変更'):self.data()
 
+    def test_unrelated_output_pdfs_do_not_block_or_change_import(self):
+        before=self.data();name='F-20261124-R001-KOBE.pdf';path=self.csv/name
+        path.write_bytes(b'%PDF-fictional-output')
+        (self.csv/'F-20261124-R001-SUGITO.pdf').write_bytes(b'%PDF-fictional-output')
+        after=self.data();self.assertEqual(after.digest,before.digest)
+        self.assertEqual(calculate(after,DAY),calculate(before,DAY))
+        from bunsen.requirements_data import SourceGuard
+        original=SourceGuard.finish
+        def change_output(guard):
+            path.write_bytes(b'%PDF-output-revised')
+            (self.csv/'other-output.pdf').write_bytes(b'%PDF-new-output')
+            return original(guard)
+        with patch.object(SourceGuard,'finish',change_output):self.assertEqual(self.data().digest,before.digest)
+
+    def test_windows_source_pdf_case_difference_is_still_monitored(self):
+        import os
+        if os.name!='nt':self.skipTest('Windows file-name case semantics')
+        evidence=list(csv.DictReader((self.csv/'source_evidence.csv').open(encoding='utf-8-sig')))
+        for r in evidence:(self.csv/r['source_pdf'].upper()).write_bytes(base64.b64decode(r['content_base64']))
+        self.assertTrue(self.data())
+        from bunsen.requirements_data import SourceGuard
+        original=SourceGuard.finish
+        def changed(guard):
+            path=self.csv/evidence[0]['source_pdf'].upper();path.write_bytes(path.read_bytes()+b'changed')
+            return original(guard)
+        with patch.object(SourceGuard,'finish',changed),self.assertRaises(DataError):self.data()
+
+    def test_source_discovery_does_not_forget_first_inventory_bytes(self):
+        original=Path.read_bytes;seen=0
+        def read(path):
+            nonlocal seen
+            result=original(path)
+            if path==self.csv/'inventory.csv':
+                seen+=1
+                if seen==1:path.write_bytes(result.replace(b',120,',b',121,'))
+            return result
+        with patch.object(Path,'read_bytes',read):
+            with self.assertRaises(DataError) as exc:self.data()
+        self.assertIn('INPUT_CHANGED',{i.code for i in exc.exception.issues})
+
     def test_snapshot_preserves_pdf_without_original_file(self):
         data=self.data();fresh=self.service.snapshot_data(data.raw,data.digest)
         self.assertEqual(fresh.digest,data.digest)

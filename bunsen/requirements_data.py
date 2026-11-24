@@ -4,6 +4,7 @@ import csv
 import hashlib
 import io
 import json
+import os
 from datetime import date
 from pathlib import Path
 
@@ -53,10 +54,34 @@ def line_units(row, product):
 
 
 class SourceGuard(InputGuard):
+    """Watch CSVs and only the PDF originals named by inventory.csv."""
+    def __init__(self,folder,ignored_names=()):
+        self.pdf_names=set()
+        super().__init__(folder,ignored_names)
+        try:
+            path=self.folder/'inventory.csv';content=path.read_bytes()
+            self.remember(path,content)
+            reader=csv.DictReader(io.StringIO(content.decode('utf-8-sig')),strict=True)
+            if reader.fieldnames and 'source_pdf' in reader.fieldnames:
+                for row in reader:
+                    name=(row.get('source_pdf') or '').strip()
+                    if Path(name).name==name and '/' not in name and '\\' not in name and name.lower().endswith('.pdf'):
+                        self.pdf_names.add(name)
+        except (OSError,UnicodeError,csv.Error):
+            # The normal CSV reader reports malformed/missing inventory in detail.
+            pass
+        self.initial.update({name:sig for name,sig in self._inventory().items() if name in self.pdf_names})
+
+    def remember(self,path,content):
+        # Preserve the earliest read, including the source-name discovery read.
+        self.contents.setdefault(path.name,content)
+
     def _inventory(self):
-        result = super()._inventory()
+        result=super()._inventory()
         from .input_guard import _signature
-        result.update({p.name: _signature(p) for p in self.folder.iterdir() if p.suffix.lower()=='.pdf'})
+        key=lambda name:name.casefold() if os.name=='nt' else name
+        names={key(name):name for name in self.pdf_names}
+        result.update({names[key(p.name)]:_signature(p) for p in self.folder.iterdir() if key(p.name) in names})
         return result
 
 
