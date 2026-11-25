@@ -155,6 +155,9 @@ def run_smoke(output):
         from .dry_stock_excel_demo import main as run_dry_excel
         run_dry_excel(home/'dry-stock-excel-kit')
         checks.append('dry_stock_excel_available_p_jan_sum')
+        from .safety_lists_demo import main as run_safety_lists
+        run_safety_lists(home/'safety-lists-kit')
+        checks.append('product_safety_and_two_shipping_lists')
     result = dict(version=__version__, frozen=bool(getattr(sys, 'frozen', False)),
                   executable=Path(sys.executable).name, checks=checks, success=True)
     output.parent.mkdir(parents=True, exist_ok=True)

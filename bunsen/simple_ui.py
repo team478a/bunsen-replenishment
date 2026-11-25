@@ -8,6 +8,8 @@ from .requirements_data import active, pallet_p
 from .ui_theme import section, table_scrollbars, text_panel, responsive_label
 
 
+OUTPUT_CHOICES={'全商品一覧':'all','出荷対象商品一覧':'shipping','全商品＋出荷対象（両方）':'both'}
+
 class SimpleUI:
     def build_daily(self):
         ttk.Label(self.daily,text='補充する数量を確認して出力',style='Title.TLabel').pack(anchor='w',pady=5)
@@ -39,6 +41,8 @@ class SimpleUI:
         self.output_bar=section(self.daily,'2  数量を確認して出力')
         ttk.Label(self.output_bar,text='担当者').pack(side='left')
         ttk.Entry(self.output_bar,textvariable=self.operator,width=18).pack(side='left',padx=6)
+        self.output_scope=tk.StringVar(value='全商品＋出荷対象（両方）')
+        ttk.Combobox(self.output_bar,textvariable=self.output_scope,values=list(OUTPUT_CHOICES),state='readonly',width=24).pack(side='left',padx=5)
         self.write_button(self.output_bar,text='確定してExcel・PDF出力',style='Primary.TButton',command=lambda:self.run(self.confirm_and_export)).pack(side='left',padx=5)
         ttk.Label(self.daily,text='商品を選ぶと数量を修正できます。出力ボタンで担当者の確認・確定を行います。',style='Muted.TLabel').pack(anchor='w',pady=4)
         self.detail_toggle=ttk.Button(self.daily,text='計算根拠・取込情報を表示',command=self.toggle_details);self.detail_toggle.pack(anchor='w')
@@ -75,6 +79,10 @@ class SimpleUI:
         factor=pallet_p(self.data,row['warehouse'],row['product']) if active(self.data) else 1
         self.qty.set(str(int(text)*factor));self.edit()
 
+    def selected_output_scope(self):
+        if self.output_scope.get() not in OUTPUT_CHOICES:raise DataError(['出力範囲を一覧から選択してください'])
+        return OUTPUT_CHOICES[self.output_scope.get()]
+
     def confirm_and_export(self):
         if not self.lines:raise DataError(['データを開いて計算してください'])
         if not self.finalized:
@@ -82,6 +90,7 @@ class SimpleUI:
             if not self.operator.get().strip():raise DataError(['担当者を入力してください'])
             errors=validate(self.data,self.lines,self.dispatch,self.service.clock())
             if errors:raise DataError(errors)
+        scope=self.selected_output_scope()
         folder=filedialog.askdirectory(title='Excel・PDFの保存先（キャンセルすると確定しません）')
         if not folder:return
         if not self.finalized:
@@ -89,7 +98,7 @@ class SimpleUI:
             try:self.issue(True)
             finally:self.ack.set(False)
         # Export retries reuse the saved instruction, without creating another revision.
-        paths=write_documents(self.service.report_payload(self.last_number),folder)
+        paths=write_documents(self.service.report_payload(self.last_number),folder,scope=scope)
         self.result_status.set(f'出力完了  {self.last_number}  /  {len(paths)}ファイル  /  {folder}')
         self.info.set(self.result_status.get())
 
@@ -99,6 +108,7 @@ class SimpleUI:
         self.history_page=ttk.Frame(self.tabs,padding=16);self.tabs.add(self.history_page,text='履歴')
         ttk.Label(self.history_page,text='保存した出荷指示',style='Title.TLabel').pack(anchor='w',pady=8)
         self.simple_history=tk.Listbox(self.history_page,height=15);self.simple_history.pack(fill='both',expand=True)
+        ttk.Combobox(self.history_page,textvariable=self.output_scope,values=list(OUTPUT_CHOICES),state='readonly',width=30).pack(anchor='w',pady=4)
         ttk.Button(self.history_page,text='選択した指示をExcel・PDF出力',command=lambda:self.run(self.export_history)).pack(anchor='w',pady=8)
         self.admin_pages=[p for p in self.tabs.tabs() if p not in (self.primary_page,str(self.history_page))]
         legacy_page=str(self.master_tab.master.master)

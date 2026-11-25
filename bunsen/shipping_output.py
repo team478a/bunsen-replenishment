@@ -1,4 +1,5 @@
 """Direct, warehouse-specific OOXML/PDF output; no business workbook dependency."""
+import csv,json
 import html
 import io
 import math
@@ -13,8 +14,38 @@ from .requirements_data import PROFILE, NOTICE
 HEADERS = ['商品','品名','現在庫P','対象予測P','安全P(最大)','必要P','換算後P','修正P','確定P','PL','甲','修正理由','到着日']
 
 
+SCOPES={'all':'全商品一覧','shipping':'出荷対象商品一覧','both':'全商品一覧＋出荷対象商品一覧'}
+
+def list_payload(payload,scope):
+    if scope not in ('all','shipping'):raise DataError(['一覧の出力範囲が不正です'])
+    return dict(payload,_list_scope=scope,lines=[r for r in payload['lines'] if scope!='shipping' or r['quantity_p']>0])
+
+def safety_source(payload,line):
+    if 'product-safety.csv' in payload.get('raw',{}):
+        from .product_safety import parse
+        if line['product'] in parse(payload['raw']['product-safety.csv'])['values'][line['warehouse']]:return '商品別設定'
+    return '倉庫別共通' if 'common-settings.csv' in payload.get('raw',{}) else '取込条件'
+
+def imported_products(payload):
+    raw=payload.get('raw',{}).get('products.csv')
+    products=list(csv.DictReader(io.StringIO(raw))) if raw else payload['tables']['products']
+    keys=[p['product'] for p in products]
+    if len(keys)!=len(set(keys)):raise DataError(['取込商品マスタのJANが重複しています'])
+    return products
+
+def headers(payload):return HEADERS+['状態'] if payload.get('_list_scope') else HEADERS
+
+def scope_note(payload,warehouse):
+    if payload.get('_list_scope')=='all':return '取込マスタの全商品。PDF未掲載・計算対象外は数量未確認として表示し、0にしません。出荷数量が未確認の行は出荷指示の対象ではありません。'
+    if payload.get('_list_scope')=='shipping':return '手修正後の最終指示数量が0を超える商品のみ。'+('この倉庫の出荷対象商品はありません。' if not any(r['warehouse']==warehouse for r in payload['lines']) else '0数量に修正した商品は全商品一覧で確認してください。')
+    return '必要Pと確定Pは区別。未確定指示の確定Pは空欄。実出荷実績は含みません。'
+
 def notice(payload):
     parts = ['必要補充数量の指示です。実出荷実績・ブンセンの供給可能在庫を示しません。']
+    if payload.get('_list_scope'):parts.append(SCOPES[payload['_list_scope']])
+    if 'product-safety.csv' in payload.get('raw',{}):
+        from .product_safety import parse
+        parts.append('商品別安全在庫版 '+str(parse(payload['raw']['product-safety.csv'])['revision']))
     if payload.get('product_scope'):parts.append(f"明示的な補充対象外JAN {len(payload['product_scope']['excluded'])}件（在庫0の意味ではありません）")
     if payload.get('profile')==PROFILE:parts.append(NOTICE)
     if payload.get('forecast_source'):
@@ -54,10 +85,27 @@ def rows(payload, warehouse):
         result.append([row['product'],product['name'],row['inventory_p'],row['demand_p'],row['safety_p'],
                        row['required_p'],row['suggested_p'],row['quantity_p'] if row['edit_reason'].strip() else None,
                        row['quantity_p'] if payload['formal'] else None,pl,remainder,row['edit_reason'],row['arrival']])
+    if payload.get('_list_scope'):
+        quantities={(r['warehouse'],r['product']):r['quantity_p'] for r in payload['lines']}
+        result=[r+['出荷対象' if quantities[(warehouse,r[0])]>0 else '出荷なし（指示0）'] for r in result]
+    if payload.get('_list_scope')=='all':
+        seen={r[0] for r in result};excluded=payload.get('product_scope',{}).get('excluded',{})
+        source=payload.get('raw',{}).get('pdf-presence.csv','');missing=set()
+        if source:
+            for item in csv.DictReader(io.StringIO(source)):
+                if item['warehouse']==warehouse:missing.update(json.loads(item['missing_json']))
+        for product in imported_products(payload):
+            p=product['product']
+            if p not in seen:
+                reason='補充対象外（マスタ設定）' if p in excluded else 'PDF未掲載・数量未確認' if p in missing else '計算対象外・数量未確認'
+                result.append([p,product['name']]+['未確認']*9+['','未確認',reason])
+        order={p['product']:i for i,p in enumerate(imported_products(payload))}
+        result.sort(key=lambda r:order.get(r[0],len(order)))
     return result
 
 
 def title(payload, warehouse):
+    if payload.get('_list_scope'):return SCOPES[payload['_list_scope']]+('（正式確定）' if payload['formal'] else '（参考・未確定）')+' - '+LABELS[warehouse]
     return ('出荷指示書（必要補充）' if payload['formal'] else '参考補充指示書')+' - '+LABELS[warehouse]
 
 
@@ -69,20 +117,20 @@ def report_html(payload, warehouse):
 <style>body{{font-family:Meiryo,sans-serif;margin:24px}}table{{border-collapse:collapse;width:100%;font-size:12px}}td,th{{border:1px solid #888;padding:6px;overflow-wrap:anywhere}}.notice{{border:3px solid #a54000;padding:10px}}pre{{white-space:pre-wrap}}@media print{{button{{display:none}}thead{{display:table-header-group}}}}</style>
 <h1>{esc(title(payload,warehouse))}</h1><p class="notice">{esc(notice(payload))}</p>
 <p>{esc(payload['number'])} / 出荷予定日 {esc(payload['dispatch'])} / 担当者 {esc(payload['operator'])} / 発行 {esc(payload['at'])}</p>
-<table><thead><tr>{''.join('<th>'+esc(v)+'</th>' for v in HEADERS)}</tr></thead><tbody>{table}</tbody></table>
+<p>{esc(scope_note(payload,warehouse))}</p><table><thead><tr>{''.join('<th>'+esc(v)+'</th>' for v in headers(payload))}</tr></thead><tbody>{table}</tbody></table>
 <h2>根拠・警告</h2><pre>{esc(basis)}</pre><p>数量・単位は商品別マスタを使用。PL＋甲は数量表記です。実ロット・期限・車両積載の確認や実出荷の登録は別業務です。</p>
 <button onclick="window.print()">印刷・PDF保存</button></html>'''
 
 
 def xlsx_bytes(payload, warehouse):
     grid=[[title(payload,warehouse)],[notice(payload)],[payload['number'],'出荷予定日',payload['dispatch'],'担当者',payload['operator']],
-          ['必要Pと確定Pは区別。未確定指示の確定Pは空欄。実出荷実績は含みません。'],[],HEADERS]+rows(payload,warehouse)
+          [scope_note(payload,warehouse)],[],headers(payload)]+rows(payload,warehouse)
     grid += [[],['データ識別',payload['digest']],['発行日時',payload['at']]]
     for line in payload['lines']:
         if line['warehouse']==warehouse:
             if line.get('source_pdf'):grid += [['在庫PDF',line['source_pdf'],'SHA-256',line['source_sha256'],'転記確認者',line['inventory_checker']]]
             grid += [[line['product'],'在庫基準',line['inventory_as_of'],'入庫網羅確認',line['transit_checked_at'] if line['transit_checked_at'] is not None else '対象外'],
-                     ['予測基準',', '.join(line['forecast_as_of'])],['警告',line['warning']]]
+                     ['予測基準',', '.join(line['forecast_as_of'])],['安全在庫日数',line['settings']['safety_days'],'適用元',safety_source(payload,line)],['警告',line['warning']]]
     return xlsx_grid_bytes(grid)
 
 
@@ -96,6 +144,7 @@ def xlsx_grid_bytes(grid):
     ET.SubElement(view,'{'+ns+'}pane',ySplit='6',topLeftCell='A7',state='frozen')
     cols=ET.SubElement(root,'{'+ns+'}cols')
     widths=[14,26,13,13,14,13,13,13,13,8,8,30,16]
+    columns=max(13,max(len(row) for row in grid));widths += [26]*(columns-13)
     for i,width in enumerate(widths,1):
         ET.SubElement(cols,'{'+ns+'}col',min=str(i),max=str(i),width=str(width),customWidth='1')
     sheet=ET.SubElement(root,'{'+ns+'}sheetData')
@@ -121,7 +170,7 @@ def xlsx_grid_bytes(grid):
                 cell.set('t','inlineStr');text=ET.SubElement(ET.SubElement(cell,'{'+ns+'}is'),'{'+ns+'}t')
                 text.text=''.join(c for c in str(value) if ord(c)>=32 or c in '\n\t\r')
     merges=ET.SubElement(root,'{'+ns+'}mergeCells',count=str(len(merged_rows)))
-    for ri in sorted(merged_rows):ET.SubElement(merges,'{'+ns+'}mergeCell',ref=f'A{ri}:M{ri}')
+    for ri in sorted(merged_rows):ET.SubElement(merges,'{'+ns+'}mergeCell',ref=f'A{ri}:{chr(64+columns)}{ri}')
     ET.SubElement(root,'{'+ns+'}pageSetup',orientation='landscape',paperSize='9',fitToWidth='1',fitToHeight='0')
     files={
         '[Content_Types].xml':'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>',
@@ -152,9 +201,11 @@ def pdf_bytes(payload, warehouse):
     document=SimpleDocTemplate(output,pagesize=landscape(A4),leftMargin=22,rightMargin=22,topMargin=22,bottomMargin=25)
     story=[Paragraph(html.escape(title(payload,warehouse)),heading),para(notice(payload)),Spacer(1,8),
            para(f'{payload["number"]} / 出荷予定日 {payload["dispatch"]} / 担当者 {payload["operator"]} / {payload["at"]}'),Spacer(1,10)]
-    indexes=[0,1,5,6,7,8,9,10,12,11]
-    grid=[[para(HEADERS[i]) for i in indexes]]+[[para(row[i]) for i in indexes] for row in rows(payload,warehouse)]
-    table=Table(grid,colWidths=[55,120,60,65,60,60,35,35,85,100],repeatRows=1,hAlign='LEFT',splitInRow=1)
+    code_style=ParagraphStyle('jan',fontName='Helvetica',fontSize=9.5,leading=14)
+    indexes=[0,1,5,6,7,8,9,12,11,13] if payload.get('_list_scope') else [0,1,5,6,7,8,9,10,12,11]
+    if payload.get('_list_scope'):story += [para(scope_note(payload,warehouse)),Spacer(1,8)]
+    grid=[[para(headers(payload)[i]) for i in indexes]]+[[(Paragraph(html.escape(str(row[i])),code_style) if i==0 and payload.get('_list_scope') else para(row[i])) for i in indexes] for row in rows(payload,warehouse)]
+    table=Table(grid,colWidths=([95,105,48,52,48,48,45,70,80,130] if payload.get('_list_scope') else [55,120,60,65,60,60,35,35,85,100]),repeatRows=1,hAlign='LEFT',splitInRow=1)
     table.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.HexColor('#e5eff5')),('GRID',(0,0),(-1,-1),.4,colors.grey),('VALIGN',(0,0),(-1,-1),'TOP'),('TOPPADDING',(0,0),(-1,-1),6),('BOTTOMPADDING',(0,0),(-1,-1),6)]))
     story += [table,Spacer(1,12),para('根拠・警告（予測は確定在庫ではありません）')]
     for line in payload['lines']:
@@ -165,6 +216,7 @@ def pdf_bytes(payload, warehouse):
             story += [para(f'{line["product"]}: 現在庫 {line["inventory_p"]}P / 対象需要予測 {line["demand_p"]}P / 安全在庫(最大) {line["safety_p"]}P'),
                       para(f'在庫基準 {line["inventory_as_of"]} ({basis}) / 入庫網羅確認 {line["transit_checked_at"] if line["transit_checked_at"] is not None else "対象外"}'),
                       para('予測基準 '+', '.join(line['forecast_as_of'])),
+                      para('安全在庫の適用元 '+safety_source(payload,line)),
                       para(f'補充サイクル {settings["cycle_days"]}日 / 配送 {settings["lead_days"]}日 / 安全在庫 {settings["safety_days"]}日分 / 対象 {settings["coverage_days"]}日 / {line["warning"]}'),Spacer(1,6)]
     story += [para('実ロット・期限・積載確認と実出荷登録は別業務。必要数量の確定は供給・実出荷を保証しません。')]
     def footer(canvas,doc):
@@ -180,18 +232,20 @@ def pdf_bytes(payload, warehouse):
     return output.getvalue()
 
 
-def write_documents(payload, folder):
+def write_documents(payload, folder, *, scope="calculated"):
     if payload.get('workflow') != 2:
         raise DataError(['旧履歴は従来の履歴再出力を使用してください'])
     if payload['formal'] and any(not r['forecast_confirmed'] for r in payload['lines']):
         raise DataError(['未確定予測の正式帳票は出力できません'])
-    folder=Path(folder).resolve()
-    outputs=[]
-    for warehouse in LABELS:
-        name=f'{payload["number"]}-{warehouse}'
-        outputs += [(folder/(name+'.xlsx'),xlsx_bytes(payload,warehouse)),
-                    (folder/(name+'.pdf'),pdf_bytes(payload,warehouse)),
-                    (folder/(name+'.html'),report_html(payload,warehouse).encode('utf-8'))]
+    if scope not in ('calculated','all','shipping','both'):raise DataError(['出力範囲を全商品・出荷対象・両方から選択してください'])
+    folder=Path(folder).resolve();outputs=[]
+    for kind in (('all','shipping') if scope=='both' else (scope,)):
+        view=payload if kind=='calculated' else list_payload(payload,kind)
+        for warehouse in LABELS:
+            name=f'{payload["number"]}-{warehouse}'+('' if kind=='calculated' else '-'+SCOPES[kind])
+            outputs += [(folder/(name+'.xlsx'),xlsx_bytes(view,warehouse)),
+                        (folder/(name+'.pdf'),pdf_bytes(view,warehouse)),
+                        (folder/(name+'.html'),report_html(view,warehouse).encode('utf-8'))]
     if any(p.exists() for p,_ in outputs):raise DataError(['既存帳票は上書きしません。別の出力フォルダーを指定してください'])
     folder.mkdir(parents=True,exist_ok=True)
     created=[]

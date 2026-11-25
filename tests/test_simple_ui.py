@@ -49,7 +49,7 @@ class SimpleUITests(unittest.TestCase):
         self.assertTrue(self.app.finalized);self.assertFalse(self.app.ack.get())
         with patch('bunsen.simple_ui.filedialog.askdirectory',return_value=str(self.path/'reports')):self.app.confirm_and_export()
         self.assertEqual(len(self.app.service.history()),1);self.assertEqual(self.app.last_number,number)
-        self.assertEqual(len(list((self.path/'reports').glob('*.pdf'))),2)
+        self.assertEqual(len(list((self.path/'reports').glob('*.pdf'))),4)
     def test_pl_edit_and_unapplied_changes(self):
         self.load();self.app.tree.selection_set('0');self.app.selected()
         self.app.edit_amount.set('2');self.app.reason.set('試験変更')

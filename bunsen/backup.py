@@ -51,7 +51,7 @@ def copy_limited(source, destination, limit):
 
 
 def raw_digest(raw):
-    if not isinstance(raw, dict) or not raw or any(name not in {k + '.csv' for k in (SCHEMA.keys() | V2_SCHEMA.keys() | REQUIREMENTS_SCHEMA.keys() | {'source_evidence','forecast-review','common-settings','product-scope','pdf-presence'})} or not isinstance(value, str) for name, value in raw.items()):
+    if not isinstance(raw, dict) or not raw or any(name not in {k + '.csv' for k in (SCHEMA.keys() | V2_SCHEMA.keys() | REQUIREMENTS_SCHEMA.keys() | {'source_evidence','forecast-review','common-settings','product-scope','pdf-presence','product-safety'})} or not isinstance(value, str) for name, value in raw.items()):
         raise DataError(['取込原本の形式が不正'])
     return hashlib.sha256(json.dumps(raw, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
@@ -93,6 +93,8 @@ def validate_database(db):
         jan_excluded={}
         common_revision,common_values=0,None
         staging_stock=None
+        from .product_safety import empty as empty_safety
+        safety_revision,safety_values=0,empty_safety()
         for event_id, at, kind, content in db.execute('SELECT * FROM events ORDER BY id'):
             stamp(at)
             payload = json.loads(content)
@@ -108,6 +110,9 @@ def validate_database(db):
             if kind=='dry_stock_check':
                 from .dry_stock_intake import validate_check
                 validate_check(payload,staging_stock,at)
+            if kind=='product_safety_change':
+                from .product_safety import validate_change
+                safety_values=validate_change(payload,safety_revision,safety_values);safety_revision=event_id
             if kind=='common_settings_change':
                 from .common_settings import validate
                 after=validate(payload.get('after'))

@@ -13,7 +13,7 @@ FIELDS=(
 
 def build_settings_page(app,parent):
     ttk.Label(parent,text='補充の条件を設定する',style='Title.TLabel').pack(anchor='w',pady=8)
-    responsive_label(parent,text='神戸・杉戸で条件を分けて設定します。各倉庫では全商品に共通です。商品選択・条件CSVは不要です。').pack(fill='x',pady=5)
+    responsive_label(parent,text='神戸・杉戸で条件を分けて設定します。倉庫別の基本条件を保存します。必要な商品だけ、下の「商品別の安全在庫」で日数を変更できます。条件CSVは不要です。').pack(fill='x',pady=5)
     app.setting_status=tk.StringVar(value='神戸・杉戸の条件をそれぞれ入力して保存してください。')
     responsive_label(parent,textvariable=app.setting_status,style='Status.TLabel').pack(fill='x',pady=6)
     conditions=section(parent,'補充条件（倉庫別・商品共通）')
@@ -39,8 +39,10 @@ def build_settings_page(app,parent):
     entry=ttk.Entry(row,textvariable=app.operator,width=18);entry.pack(side='left',padx=8);app.setting_entries.append(entry)
     app.setting_save_button=app.write_button(row,text='倉庫別の条件を保存',style='Primary.TButton',command=lambda:app.run(lambda:app.confirmed_action(app.setting_checked,app.apply_settings)))
     app.setting_save_button.pack(side='left',padx=5)
-    responsive_label(last,text='保存した条件は、次回のデータ取込から該当倉庫の全商品に適用します。変更履歴は保存します。条件変更後はデータを再取込・再計算してください。',style='Muted.TLabel').pack(fill='x',pady=4)
+    responsive_label(last,text='保存した基本条件は、次回の取込から該当倉庫の全商品に適用します。商品別設定がある場合は、その安全在庫日数を優先します。変更履歴は保存します。条件変更後はデータを再取込・再計算してください。',style='Muted.TLabel').pack(fill='x',pady=4)
     responsive_label(parent,text='倉庫番号KOBE・SUGITOはアプリ内の識別です。予測CSVの倉庫番号は登録済みの対応だけを表示します。商品の賞味・消費期限や1PLのP数は「JAN・倉庫別PLマスタ」で設定します。出荷指示の再出力は「履歴」を使ってください。',style='Muted.TLabel').pack(fill='x',pady=8)
+    from .product_safety_ui import build_product_safety
+    build_product_safety(app,parent)
     # Legacy controls remain for old v2 data/API, hidden from the JAN workflow.
     app.expiry_frame=ttk.LabelFrame(parent,text='旧v2データの期限設定',padding=8)
     expiry=app.expiry_frame

@@ -17,19 +17,19 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class DistributionTests(unittest.TestCase):
-    def test_portable_user_manual_has_thirteen_pages_and_current_workflow(self):
+    def test_portable_user_manual_has_fourteen_pages_and_current_workflow(self):
         import pdfplumber
         with tempfile.TemporaryDirectory() as temp:
             target=Path(temp)/'manual.pdf'
             result=subprocess.run([sys.executable,str(ROOT/'scripts/create_user_manual.py'),'--portable-fonts','--output',str(target)],capture_output=True,timeout=30)
             self.assertEqual(result.returncode,0,result.stderr.decode('utf-8',errors='replace'))
             with pdfplumber.open(target) as pdf:
-                self.assertEqual(len(pdf.pages),13)
+                self.assertEqual(len(pdf.pages),14)
                 text=''.join((page.extract_text() or '').replace('\n','').replace(' ','') for page in pdf.pages)
                 self.assertIn('CSVひな形を保存',text);self.assertIn('始業・終業の選択はありません',text)
                 self.assertIn('全JANマスタを初期化',text);self.assertIn('展開先',text)
                 self.assertIn('乾麺倉庫',text);self.assertIn('他出荷向け取置P',text)
-                self.assertIn('必要な予測は11月25日〜12月1日',text);self.assertIn('商品別安全在庫は未対応',text)
+                self.assertIn('必要な予測は11月25日〜12月1日',text);self.assertIn('商品別の安全在庫を保存',text)
 
     def test_source_and_frozen_resource_paths_ignore_working_directory(self):
         self.assertEqual(resource_root(), ROOT)
@@ -59,6 +59,7 @@ class DistributionTests(unittest.TestCase):
             self.assertIn('isolated_storage_and_backed_up_master_reset', payload['checks'])
             self.assertIn('warehouse_specific_conditions_arrival_and_reports', payload['checks'])
             self.assertIn('dry_stock_csv_and_joint_quantity_comparison', payload['checks'])
+            self.assertIn('product_safety_and_two_shipping_lists', payload['checks'])
             self.assertFalse((root / 'normal').exists())
 
     def test_build_resources_copy_only_allowlisted_tracked_files(self):

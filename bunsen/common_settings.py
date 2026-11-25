@@ -53,11 +53,15 @@ def parse(text):
     if proof(state)!=text:raise DataError(['共通条件の証跡形式が不一致です'])
     return state
 
-def requirements(state,products):
+def requirements(state,products,product_safety=None):
     from .requirements_data import SCHEMA,csv_text
-    if warehouse_specific(state['values']):
-        return csv_text(SCHEMA['requirements'],[dict(warehouse=w,product=p,**state['values'][w],confirmed='yes') for w in WAREHOUSES for p in sorted(products)])
-    return csv_text(SCHEMA['requirements'],[dict(warehouse=w,product=p,**state['values'],confirmed='yes') for w in WAREHOUSES for p in sorted(products)])
+    rows=[]
+    for w in WAREHOUSES:
+        for p in sorted(products):
+            values=dict(state['values'][w] if warehouse_specific(state['values']) else state['values'])
+            if product_safety is not None and p in product_safety['values'][w]:values['safety_days']=product_safety['values'][w][p]
+            rows.append(dict(warehouse=w,product=p,**values,confirmed='yes'))
+    return csv_text(SCHEMA['requirements'],rows)
 
 class CommonSettings:
     def common_settings(self):
@@ -98,11 +102,14 @@ class CommonSettings:
             from .product_scope import FILE as SCOPE_FILE,text
             products=[p for p in products if p not in scope['excluded']]
             replacements[SCOPE_FILE]=text(scope)
-        replacements.update({'requirements.csv':requirements(state,products),FILE:proof(state)})
+        from .product_safety import FILE as SAFETY_FILE,proof as safety_proof
+        safety=self.product_safety()
+        replacements.update({'requirements.csv':requirements(state,products,safety),FILE:proof(state),SAFETY_FILE:safety_proof(safety)})
         checked=inspect(folder,self.clock(),replacements)
         if checked.issues:raise DataError(checked.issues)
         data=checked.dataset
         if master:data.jan_master_revision=master['revision'];self.assert_jan_current(data)
         self.assert_common_settings_current(data)
+        self.assert_product_safety_current(data)
         self.assert_jan_current(data)
         return data
