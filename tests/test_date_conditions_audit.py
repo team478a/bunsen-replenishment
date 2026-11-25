@@ -1,6 +1,7 @@
 """Fixed-date regressions supporting the operational date-condition manual."""
 import csv,io,tempfile,tkinter as tk,unittest
 from pathlib import Path
+from unittest.mock import patch
 from datetime import date,datetime,timedelta
 from bunsen.core import DataError,JST,calculate
 from bunsen.jan_demo import create_kit
@@ -64,6 +65,8 @@ class DateConditionsAuditTests(unittest.TestCase):
             app.ack.set(True);app.day.set('2026-11-26')
             self.assertIsNone(app.lines);self.assertFalse(app.ack.get())
             with self.assertRaises(DataError):app.confirm_and_export()
-            app.compute();self.assertEqual(app.dispatch,date(2026,11,26));self.assertNotEqual(app.lines,before)
+            for w in ('KOBE','SUGITO'):(self.csv/('F-20261125-R001-'+w+'.pdf')).write_bytes(b'%PDF-fictional-shipping-output')
+            with patch('bunsen.replenishment_ui.filedialog.askdirectory',return_value=str(self.csv)):app.open_and_compute()
+            self.assertEqual(app.dispatch,date(2026,11,26));self.assertNotEqual(app.lines,before)
             self.assertEqual(app.lines[0]['arrival'],'2026-11-27')
         finally:app.close()
