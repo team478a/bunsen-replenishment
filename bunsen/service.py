@@ -18,6 +18,7 @@ from .jan_catalog import JanCatalog, master_csvs
 from .requirements_data import active, PROFILE, NOTICE
 from .forecast_service import ForecastService
 from .common_settings import CommonSettings
+from .product_safety import ProductSafety
 from .dry_stock_intake import DryStockIntake
 
 
@@ -25,7 +26,7 @@ def encode(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
-class Service(DryStockIntake, CommonSettings, ForecastService, JanCatalog, CatalogService):
+class Service(DryStockIntake, ProductSafety, CommonSettings, ForecastService, JanCatalog, CatalogService):
     def __init__(self, db_path, clock=now_jst):
         self.clock = clock
         self.db_path = Path(db_path).resolve()
@@ -248,6 +249,7 @@ class Service(DryStockIntake, CommonSettings, ForecastService, JanCatalog, Catal
                 raise DataError(['過去日を含む配送予定は確定できません。新たに計算してください'])
             fresh=self.snapshot_data(saved['raw'],report['digest'])
             self.assert_common_settings_current(fresh)
+            self.assert_product_safety_current(fresh)
             self.assert_jan_current(fresh)
             verified=build_plan(fresh,date.fromisoformat(report['start']),stamp(report['calculated_at']),allow_provisional=report['allow_provisional'])
             for key,value in verified.items():

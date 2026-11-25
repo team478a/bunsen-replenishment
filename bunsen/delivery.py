@@ -109,6 +109,8 @@ def build_plan(data, start, calculated_at, *, allow_provisional=False):
     if metadata(data.raw) is not None:report['forecast_source']=metadata(data.raw)
     from .product_scope import FILE,parse
     if FILE in data.raw:report['product_scope']=parse(data.raw[FILE])
+    from .product_safety import FILE as SAFETY_FILE,parse as parse_safety
+    if SAFETY_FILE in data.raw:report['product_safety']=parse_safety(data.raw[SAFETY_FILE])
     return canonical(report)
 
 

@@ -2,6 +2,7 @@
 from datetime import date
 from pathlib import Path
 from .simple_ui import SimpleUI
+from .product_safety_ui import ProductSafetyUI
 from .exact_quantity import number
 import json
 import tkinter as tk
@@ -19,7 +20,7 @@ from .requirements_data import active, line_units, NOTICE, pallet_p
 from .ui_theme import apply_theme, brand, section, table_scrollbars, text_panel, responsive_label, scroll_page
 
 
-class App(SimpleUI, JanCatalogUI, CatalogUI, DeliveryUI, LegacyApp):
+class App(SimpleUI, ProductSafetyUI, JanCatalogUI, CatalogUI, DeliveryUI, LegacyApp):
     diagnostic_workflow=2
     def __init__(self, root, data_home=None):
         from .storage import default_home
@@ -123,8 +124,10 @@ class App(SimpleUI, JanCatalogUI, CatalogUI, DeliveryUI, LegacyApp):
             codes=sorted(k for k,v in mapping.items() if v==w)
             var.set(LABELS[w]+'\n倉庫番号: '+w+'\n予測CSVの倉庫番号: '+('・'.join(codes) if codes else '未登録'))
         self.setting_checked.set(False)
-        self.setting_status.set(f"倉庫別の条件を保存済み（版{state['revision']} / 確認者 {state['operator']}）。商品別設定・条件CSVは不要です。" if specific else
+        self.setting_status.set(f"倉庫別の条件を保存済み（版{state['revision']} / 確認者 {state['operator']}）。商品別の安全在庫は下で設定できます。条件CSVは不要です。" if specific else
             '神戸・杉戸の条件をそれぞれ入力して保存してください。'+(' 旧共通条件は履歴に保持: '+' / '.join(label+' '+str(state['values'][key]) for key,label,_ in FIELDS)+'。倉庫別に再確認するまで新規計算へ適用しません。' if state['values'] is not None else ''))
+
+        self.refresh_product_safety()
 
     def apply_settings(self):
         if not self.setting_checked.get():raise DataError(['条件の確認保存が必要です'])
@@ -226,7 +229,7 @@ class App(SimpleUI, JanCatalogUI, CatalogUI, DeliveryUI, LegacyApp):
         folder=filedialog.askdirectory(title='帳票の保存先（既存帳票は上書きしません）')
         if not folder:return
         payload=self.service.report_payload(number)
-        paths=write_documents(payload,folder) if payload.get('workflow')==2 else write_reports(payload,folder)
+        paths=write_documents(payload,folder,scope=self.selected_output_scope()) if payload.get('workflow')==2 else write_reports(payload,folder)
         kind='Excel/PDF/HTML' if payload.get('workflow')==2 else '旧方式の履歴HTML（新方式へ読み替えません）'
         self.info.set(f'{number}: {kind} {len(paths)}ファイル出力。保存先 {folder}。必要補充指示であり実出荷実績ではありません。')
 

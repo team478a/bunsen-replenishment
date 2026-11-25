@@ -96,7 +96,7 @@ def inspect(folder, now, master_csvs=None):
     ignored = {'transit.csv','dry_stock.csv','vehicles.csv','warehouses.csv','policies.csv','replenishment.csv'}
     replacements = master_csvs or {}
     ignored.update(replacements)
-    if set(replacements)-{'products.csv','pallets.csv','requirements.csv','common-settings.csv','product-scope.csv'}:
+    if set(replacements)-{'products.csv','pallets.csv','requirements.csv','common-settings.csv','product-scope.csv','product-safety.csv'}:
         raise DataError(['登録JANマスタの置換対象が不正です'])
     try:
         guard = SourceGuard(folder, ignored)
@@ -121,6 +121,14 @@ def inspect(folder, now, master_csvs=None):
             raw[FILE]=content.decode('utf-8-sig').replace('\r\n','\n').replace('\r','\n')
             common=parse(raw[FILE])
             if stamp(common['saved_at'])>now:raise ValueError('共通条件の保存日時が未来です')
+        from .product_safety import FILE as SAFETY_FILE,parse as parse_safety
+        safety=None
+        if SAFETY_FILE in replacements or (folder/SAFETY_FILE).exists():
+            content=replacements[SAFETY_FILE].encode('utf-8') if SAFETY_FILE in replacements else (folder/SAFETY_FILE).read_bytes()
+            if SAFETY_FILE not in replacements:guard.remember(folder/SAFETY_FILE,content)
+            raw[SAFETY_FILE]=content.decode('utf-8-sig').replace('\r\n','\n').replace('\r','\n');safety=parse_safety(raw[SAFETY_FILE])
+            if common is None:raise DataError(['商品別安全在庫には倉庫別の共通条件証跡が必要です'])
+            if safety['saved_at'] and stamp(safety['saved_at'])>now:raise ValueError('商品別安全在庫の保存日時が未来です')
         from .pdf_presence import FILE as PRESENCE_FILE,verify as verify_presence
         skipped=set()
         if (folder/PRESENCE_FILE).exists():
@@ -128,7 +136,7 @@ def inspect(folder, now, master_csvs=None):
             raw[PRESENCE_FILE]=content.decode('utf-8-sig').replace('\r\n','\n').replace('\r','\n')
             proof=(folder/'source_evidence.csv').read_bytes();guard.remember(folder/'source_evidence.csv',proof)
             presence_evidence=proof.decode('utf-8-sig').replace('\r\n','\n').replace('\r','\n')
-        allowed = {k+'.csv' for k in SCHEMA} | {'source_evidence.csv',REVIEW_FILE,FILE,SCOPE_FILE,PRESENCE_FILE}
+        allowed = {k+'.csv' for k in SCHEMA} | {'source_evidence.csv',REVIEW_FILE,FILE,SCOPE_FILE,PRESENCE_FILE,SAFETY_FILE}
         for filename in guard.initial:
             if filename.endswith('.csv') and filename not in allowed:
                 guard.remember(folder/filename,(folder/filename).read_bytes())
@@ -187,7 +195,7 @@ def inspect(folder, now, master_csvs=None):
         if scope:
             for table,rows in tables.items():tables[table]=[r for r in rows if r['product'] not in scope['excluded']]
         products={r['product'] for r in tables['products']}
-        if common is not None and raw.get('requirements.csv')!=requirements(common,products):error('requirements',None,'共通補充条件と計算用の条件が不一致です')
+        if common is not None and raw.get('requirements.csv')!=requirements(common,products,safety):error('requirements',None,'共通補充条件と計算用の条件が不一致です')
         if not products:error('products','product','商品がありません')
         for table,rows in tables.items():
             for row in rows:
