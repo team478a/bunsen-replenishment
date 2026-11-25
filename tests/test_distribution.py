@@ -17,18 +17,19 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class DistributionTests(unittest.TestCase):
-    def test_portable_user_manual_has_twelve_pages_and_current_workflow(self):
+    def test_portable_user_manual_has_thirteen_pages_and_current_workflow(self):
         import pdfplumber
         with tempfile.TemporaryDirectory() as temp:
             target=Path(temp)/'manual.pdf'
             result=subprocess.run([sys.executable,str(ROOT/'scripts/create_user_manual.py'),'--portable-fonts','--output',str(target)],capture_output=True,timeout=30)
             self.assertEqual(result.returncode,0,result.stderr.decode('utf-8',errors='replace'))
             with pdfplumber.open(target) as pdf:
-                self.assertEqual(len(pdf.pages),12)
+                self.assertEqual(len(pdf.pages),13)
                 text=''.join((page.extract_text() or '').replace('\n','').replace(' ','') for page in pdf.pages)
                 self.assertIn('CSVひな形を保存',text);self.assertIn('始業・終業の選択はありません',text)
                 self.assertIn('全JANマスタを初期化',text);self.assertIn('展開先',text)
                 self.assertIn('乾麺倉庫',text);self.assertIn('他出荷向け取置P',text)
+                self.assertIn('必要な予測は11月25日〜12月1日',text);self.assertIn('商品別安全在庫は未対応',text)
 
     def test_source_and_frozen_resource_paths_ignore_working_directory(self):
         self.assertEqual(resource_root(), ROOT)
