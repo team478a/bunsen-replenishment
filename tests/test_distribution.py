@@ -29,7 +29,7 @@ class DistributionTests(unittest.TestCase):
                 self.assertIn('CSVひな形を保存',text);self.assertIn('始業・終業の選択はありません',text)
                 self.assertIn('全JANマスタを初期化',text);self.assertIn('展開先',text)
                 self.assertIn('乾麺倉庫',text);self.assertIn('他出荷向け取置P',text)
-                self.assertIn('必要な予測は11月25日〜12月1日',text);self.assertIn('商品別の安全在庫を保存',text)
+                self.assertIn('必要末日12/15',text);self.assertIn('商品別の安全在庫を保存',text)
 
     def test_source_and_frozen_resource_paths_ignore_working_directory(self):
         self.assertEqual(resource_root(), ROOT)
