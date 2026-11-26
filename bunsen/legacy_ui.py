@@ -403,9 +403,11 @@ class LegacyApp:
             action()
         except (DataError, ValueError, OSError, sqlite3.Error) as exc:
             self.ack.set(False)
-            from .error_messages import describe_error
+            from .error_messages import describe_error, error_details
             title,message=describe_error(exc)
-            self.show(message)
+            self.show(error_details(exc))
+            if hasattr(self,'details_frame') and not self.details_frame.winfo_manager():
+                self.toggle_details()
             messagebox.showerror(title,message)
 
     def show(self, text):
